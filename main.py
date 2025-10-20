@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 import pyaudio
 import whisper
 import numpy as np
-from pyannote.audio import Pipeline
+from openai import AzureOpenAI
 
 # Load environment variables
 load_dotenv()
@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTextEdit, QLabel, QStatusBar, QProgressBar, QTabWidget,
     QListWidget, QListWidgetItem, QInputDialog, QMessageBox, QSplitter,
-    QRadioButton, QButtonGroup, QGroupBox, QCheckBox
+    QRadioButton, QButtonGroup, QGroupBox, QCheckBox, QSpinBox, QFormLayout
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QPalette, QColor, QIcon
@@ -44,10 +44,22 @@ class AudioRecorder:
         self.audio = pyaudio.PyAudio()
         self.stream = None
 
-    def start_recording(self):
+        # For 30-second segments with 15-second overlap
+        self.segment_duration = 30  # seconds
+        self.overlap_duration = 15  # seconds
+        self.segment_callback = None  # Callback function for segment ready
+        self.segment_counter = 0
+        self.recording_timestamp = None
+        self.all_frames = []  # Keep all frames for complete recording
+
+    def start_recording(self, segment_callback=None):
         """Start recording audio from microphone"""
         self.frames = []
+        self.all_frames = []  # Reset complete recording
         self.is_recording = True
+        self.segment_callback = segment_callback
+        self.segment_counter = 0
+        self.recording_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         self.stream = self.audio.open(
             format=self.FORMAT,
@@ -58,16 +70,56 @@ class AudioRecorder:
         )
 
         def record():
+            frames_per_segment = int(self.RATE * self.segment_duration / self.CHUNK)
+            frames_for_overlap = int(self.RATE * self.overlap_duration / self.CHUNK)
+
             while self.is_recording:
                 try:
                     data = self.stream.read(self.CHUNK, exception_on_overflow=False)
                     self.frames.append(data)
+                    self.all_frames.append(data)  # Also store in complete recording
+
+                    # Check if we have 30 seconds of audio
+                    if len(self.frames) >= frames_per_segment:
+                        # Save 30-second segment
+                        segment_frames = self.frames[:frames_per_segment]
+                        self.save_segment(segment_frames, self.segment_counter)
+
+                        # Keep only last 15 seconds for overlap in segment buffer
+                        self.frames = self.frames[frames_per_segment - frames_for_overlap:]
+                        self.segment_counter += 1
+
                 except Exception as e:
                     print(f"Recording error: {e}")
                     break
 
         self.record_thread = threading.Thread(target=record, daemon=True)
         self.record_thread.start()
+
+    def save_segment(self, frames, segment_num):
+        """Save a 30-second segment to file"""
+        try:
+            # Create segments directory
+            segments_dir = Path(f"recordings/segments_{self.recording_timestamp}")
+            segments_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save segment file
+            segment_filename = segments_dir / f"segment_{segment_num:03d}.wav"
+            wf = wave.open(str(segment_filename), 'wb')
+            wf.setnchannels(self.CHANNELS)
+            wf.setsampwidth(self.audio.get_sample_size(self.FORMAT))
+            wf.setframerate(self.RATE)
+            wf.writeframes(b''.join(frames))
+            wf.close()
+
+            print(f"DEBUG: Saved segment {segment_num} to {segment_filename}")
+
+            # Call callback if provided
+            if self.segment_callback:
+                self.segment_callback(str(segment_filename), segment_num)
+
+        except Exception as e:
+            print(f"Error saving segment: {e}")
 
     def stop_recording(self):
         """Stop recording and return the audio file path"""
@@ -86,21 +138,22 @@ class AudioRecorder:
         except Exception as e:
             print(f"Error closing stream: {e}")
 
-        # Save to temporary file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Use the recording timestamp from start_recording
+        timestamp = self.recording_timestamp if self.recording_timestamp else datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"recordings/recording_{timestamp}.wav"
 
         # Create recordings directory if it doesn't exist
         Path("recordings").mkdir(exist_ok=True)
 
-        # Save the recording
+        # Save the complete recording using all_frames
         try:
             wf = wave.open(filename, 'wb')
             wf.setnchannels(self.CHANNELS)
             wf.setsampwidth(self.audio.get_sample_size(self.FORMAT))
             wf.setframerate(self.RATE)
-            wf.writeframes(b''.join(self.frames))
+            wf.writeframes(b''.join(self.all_frames))  # Use all_frames for complete recording
             wf.close()
+            print(f"DEBUG: Saved complete recording with {len(self.all_frames)} frames to {filename}")
         except Exception as e:
             print(f"Error saving recording: {e}")
 
@@ -140,7 +193,7 @@ class RecordingManager:
         except Exception as e:
             print(f"Error saving recordings: {e}")
 
-    def add_recording(self, audio_file, timestamp, name=None, transcription="", summary=""):
+    def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model=""):
         """Add a new recording"""
         recording = {
             "id": timestamp,
@@ -148,11 +201,25 @@ class RecordingManager:
             "name": name or f"Opname {timestamp}",
             "date": datetime.strptime(timestamp, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S"),
             "transcription": transcription,
-            "summary": summary
+            "summary": summary,
+            "duration": duration,  # Duration in seconds
+            "model": model  # Model used for transcription
         }
         self.recordings.insert(0, recording)  # Add to beginning
         self.save_recordings()
         return recording
+
+    def get_audio_duration(self, audio_file):
+        """Get duration of audio file in seconds"""
+        try:
+            with wave.open(audio_file, 'rb') as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                duration = frames / float(rate)
+                return int(duration)
+        except Exception as e:
+            print(f"Error getting audio duration: {e}")
+            return 0
 
     def update_recording(self, recording_id, **kwargs):
         """Update recording data"""
@@ -177,6 +244,7 @@ class TranscriptionApp(QMainWindow):
     transcription_complete = pyqtSignal(dict)
     summary_complete = pyqtSignal(str)
     model_loaded = pyqtSignal(str, object)  # (model_name, model_object)
+    segment_transcribed = pyqtSignal(str)  # Signal for incremental transcription updates
 
     def __init__(self):
         super().__init__()
@@ -186,10 +254,6 @@ class TranscriptionApp(QMainWindow):
         # Model caching: store loaded models
         self.loaded_models = {}  # {model_name: model_object}
         self.selected_model_name = "tiny"  # Default selected model
-
-        # Speaker diarization setup
-        self.diarization_pipeline = None
-        self.enable_diarization = False
 
         self.is_recording = False
         self.recording_time = 0
@@ -201,12 +265,71 @@ class TranscriptionApp(QMainWindow):
         self.transcription_complete.connect(self.on_transcription_complete)
         self.summary_complete.connect(self.on_summary_complete)
         self.model_loaded.connect(self.on_model_loaded)
+        self.segment_transcribed.connect(self.on_segment_transcribed)
 
         # Track pending transcription
         self.pending_transcription = False
 
+        # Track segments for incremental transcription
+        self.segments_to_transcribe = []  # Queue of segments to transcribe
+        self.transcribed_segments = []  # List of transcribed texts
+        self.is_transcribing_segment = False  # Flag to track if currently transcribing
+
+        # Settings
+        self.segment_duration = 30  # seconds
+        self.overlap_duration = 15  # seconds
+        self.summary_prompt = """Maak een samenvatting wat hier besproken is. Geef ook de actiepunten.
+Er zijn meerdere personen aan het woord geweest maar dat is niet aangegeven in de tekst,
+probeer dat er zelf uit te halen. Geef het weer in de volgende vorm, waarbij je <blabla> vervangt door
+de juiste informatie. Zet deelnemers in alfabetische volgorde, actiepunten in volgorde van hoe ze aan bod kwamen in
+de tekst. Soms wordt er over personen gesproken maar zijn ze niet aanwezig in de meeting,
+zet ze dan ook niet bij de deelnemers.
+
+--- Deelnemers ---
+- <persoon 1> - <Mening van die persoon in 1 zin>
+- <persoon 2> - <Mening van die persoon in 1 zin>
+- etc...
+
+--- Samenvatting ---
+<korte samenvatting in 3 zinnen>
+
+--- Actiepunten ---
+- <actiepunt 1> -- <verantwoordelijke persoon>
+- <actiepunt 2> -- <verantwoordelijke persoon>
+- etc...
+
+Hier volgt de tekst:"""
+
+        # Azure OpenAI client for summary generation
+        self.azure_client = None
+        self.init_azure_client()
+
         self.init_ui()
         self.refresh_recording_list()
+
+        # Load default model (tiny) on startup
+        QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
+
+    def init_azure_client(self):
+        """Initialize Azure OpenAI client"""
+        try:
+            api_key = os.getenv('AZURE_OPENAI_API_KEY')
+            endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+            api_version = os.getenv('OPENAI_API_VERSION')
+
+            if not all([api_key, endpoint, api_version]):
+                print("WARNING: Azure OpenAI credentials not found in .env file")
+                return
+
+            self.azure_client = AzureOpenAI(
+                api_key=api_key,
+                api_version=api_version,
+                azure_endpoint=endpoint
+            )
+            print(f"DEBUG: Azure OpenAI client initialized successfully")
+        except Exception as e:
+            print(f"WARNING: Could not initialize Azure OpenAI client: {e}")
+            self.azure_client = None
 
     def init_ui(self):
         """Initialize the user interface"""
@@ -428,12 +551,6 @@ class TranscriptionApp(QMainWindow):
         model_group.setLayout(model_layout)
         right_layout.addWidget(model_group)
 
-        # Speaker diarization checkbox
-        self.diarization_checkbox = QCheckBox("🎭 Speaker herkenning (langzaam, ~5-10 min)")
-        self.diarization_checkbox.setStyleSheet("font-size: 13px; padding: 5px;")
-        self.diarization_checkbox.stateChanged.connect(self.on_diarization_toggled)
-        right_layout.addWidget(self.diarization_checkbox)
-
         # Recording controls
         control_layout = QHBoxLayout()
         control_layout.setSpacing(15)
@@ -518,8 +635,65 @@ class TranscriptionApp(QMainWindow):
         self.summary_text.setFont(QFont("Arial", 13))
         summary_layout.addWidget(self.summary_text)
 
+        # Settings tab
+        settings_widget = QWidget()
+        settings_layout = QVBoxLayout(settings_widget)
+        settings_layout.setContentsMargins(15, 15, 15, 15)
+
+        settings_label = QLabel("⚙️ Instellingen")
+        settings_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        settings_label.setStyleSheet("color: #1976D2;")
+        settings_layout.addWidget(settings_label)
+
+        # Form for settings
+        settings_form = QWidget()
+        form_layout = QFormLayout(settings_form)
+        form_layout.setSpacing(15)
+        form_layout.setContentsMargins(10, 20, 10, 10)
+
+        # Segment duration
+        self.segment_duration_spin = QSpinBox()
+        self.segment_duration_spin.setMinimum(10)
+        self.segment_duration_spin.setMaximum(120)
+        self.segment_duration_spin.setValue(self.segment_duration)
+        self.segment_duration_spin.setSuffix(" seconden")
+        self.segment_duration_spin.setStyleSheet("QSpinBox { padding: 8px; font-size: 13px; }")
+        form_layout.addRow("Lengte fragmenten:", self.segment_duration_spin)
+
+        # Overlap duration
+        self.overlap_duration_spin = QSpinBox()
+        self.overlap_duration_spin.setMinimum(5)
+        self.overlap_duration_spin.setMaximum(60)
+        self.overlap_duration_spin.setValue(self.overlap_duration)
+        self.overlap_duration_spin.setSuffix(" seconden")
+        self.overlap_duration_spin.setStyleSheet("QSpinBox { padding: 8px; font-size: 13px; }")
+        form_layout.addRow("Overlap fragmenten:", self.overlap_duration_spin)
+
+        settings_layout.addWidget(settings_form)
+
+        # Summary prompt text area
+        prompt_label = QLabel("Samenvatting Prompt:")
+        prompt_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        prompt_label.setStyleSheet("color: #333; margin-top: 10px;")
+        settings_layout.addWidget(prompt_label)
+
+        self.summary_prompt_text = QTextEdit()
+        self.summary_prompt_text.setPlainText(self.summary_prompt)
+        self.summary_prompt_text.setFont(QFont("Arial", 12))
+        self.summary_prompt_text.setMinimumHeight(250)
+        settings_layout.addWidget(self.summary_prompt_text)
+
+        # Apply button
+        apply_btn = QPushButton("✓ Instellingen Toepassen")
+        apply_btn.setMinimumHeight(45)
+        apply_btn.clicked.connect(self.apply_settings)
+        settings_layout.addWidget(apply_btn)
+
+        settings_layout.addStretch()
+
         self.tabs.addTab(transcription_widget, "Transcriptie")
         self.tabs.addTab(summary_widget, "Samenvatting")
+        self.tabs.addTab(settings_widget, "Instellingen")
 
         right_layout.addWidget(self.tabs, stretch=1)
 
@@ -539,43 +713,6 @@ class TranscriptionApp(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
 
-    def load_diarization_pipeline(self):
-        """Load speaker diarization pipeline with HF token"""
-        def load_pipeline():
-            try:
-                hf_token = os.getenv('HF_TOKEN')
-                if not hf_token:
-                    print("WARNING: HF_TOKEN not found in .env file")
-                    return
-
-                print(f"DEBUG: Loading diarization pipeline with HF token...")
-                self.diarization_pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization",
-                    use_auth_token=hf_token
-                )
-                print(f"DEBUG: Diarization pipeline loaded successfully!")
-            except Exception as e:
-                print(f"WARNING: Could not load diarization pipeline: {e}")
-                print(f"Speaker detection will be disabled")
-
-        # Load in background
-        thread = threading.Thread(target=load_pipeline, daemon=True)
-        thread.start()
-
-    def on_diarization_toggled(self, state):
-        """Handle speaker diarization checkbox toggle"""
-        self.enable_diarization = (state == Qt.CheckState.Checked.value)
-
-        if self.enable_diarization:
-            # Load pipeline if not already loaded
-            if not self.diarization_pipeline:
-                self.status_bar.showMessage("Speaker herkenning pipeline laden...")
-                self.load_diarization_pipeline()
-            else:
-                self.status_bar.showMessage("Speaker herkenning ingeschakeld (zeer traag op CPU)")
-        else:
-            self.status_bar.showMessage("Speaker herkenning uitgeschakeld")
-
     def on_model_changed(self, model_name):
         """Handle model selection change"""
         if model_name == self.selected_model_name:
@@ -587,22 +724,15 @@ class TranscriptionApp(QMainWindow):
         # Check if already loaded
         if model_name in self.loaded_models:
             self.status_bar.showMessage(f"{model_name.capitalize()} model geselecteerd (reeds geladen)")
+            self.status_label.setText(f"✅ {model_name.capitalize()} model klaar")
         else:
-            self.status_bar.showMessage(f"{model_name.capitalize()} model geselecteerd (wordt geladen bij volgende transcriptie)")
+            # Load model immediately
+            self.status_bar.showMessage(f"{model_name.capitalize()} model wordt geladen...")
+            self.status_label.setText(f"Model {model_name} laden...")
+            self.load_model_async(model_name)
 
-    def get_or_load_model(self, model_name):
-        """Get model from cache or load it (lazy loading with caching)"""
-        # Check if model is already cached
-        if model_name in self.loaded_models:
-            print(f"DEBUG: Using cached {model_name} model")
-            # Immediately proceed with transcription
-            self.start_transcription_with_model(self.loaded_models[model_name])
-            return
-
-        # Model not cached, need to load it
-        print(f"DEBUG: Loading {model_name} model for first time...")
-        self.pending_transcription = True
-
+    def load_model_async(self, model_name):
+        """Load a model asynchronously (used for immediate loading on model switch)"""
         model_sizes = {
             "tiny": "~1GB, snel",
             "small": "~2GB, goed",
@@ -643,19 +773,41 @@ class TranscriptionApp(QMainWindow):
         thread = threading.Thread(target=load_model, daemon=True)
         thread.start()
 
+    def get_or_load_model(self, model_name):
+        """Get model from cache or load it (lazy loading with caching)"""
+        # Check if model is already cached
+        if model_name in self.loaded_models:
+            print(f"DEBUG: Using cached {model_name} model")
+            # Immediately proceed with transcription
+            self.start_transcription_with_model(self.loaded_models[model_name])
+            return
+
+        # Model not cached, need to load it
+        print(f"DEBUG: Loading {model_name} model for first time...")
+        self.pending_transcription = True
+        self.load_model_async(model_name)
+
     def on_model_loaded(self, model_name, model):
         """Handle model loaded signal (main thread)"""
         print(f"DEBUG: on_model_loaded called for {model_name}, model: {model is not None}")
 
-        self.status_label.setText(f"✅ {model_name.capitalize()} model geladen")
-        self.status_bar.showMessage(f"Whisper {model_name} model succesvol geladen en gecached")
+        if model:
+            self.status_label.setText(f"✅ {model_name.capitalize()} model geladen")
+            self.status_bar.showMessage(f"Whisper {model_name} model succesvol geladen en gecached")
+        else:
+            self.status_label.setText(f"❌ {model_name.capitalize()} model laden mislukt")
+            self.status_bar.showMessage(f"Fout bij laden van {model_name} model")
+
+        # Re-enable UI
         self.enable_ui_after_model_load()
 
+        # If there was a pending transcription, start it now
         if model and self.pending_transcription:
             print(f"DEBUG: Starting pending transcription...")
             self.pending_transcription = False
             self.start_transcription_with_model(model)
-        elif not model:
+        elif not model and self.pending_transcription:
+            self.pending_transcription = False
             self.transcription_complete.emit({"error": "Model laden mislukt"})
 
     def enable_ui_after_model_load(self):
@@ -670,7 +822,17 @@ class TranscriptionApp(QMainWindow):
         """Refresh the recording list"""
         self.recording_list.clear()
         for rec in self.recording_manager.recordings:
-            item_text = f"🎵 {rec['name']}\n📅 {rec['date']}"
+            # Format duration
+            duration = rec.get('duration', 0)
+            minutes = duration // 60
+            seconds = duration % 60
+            duration_str = f"{minutes}:{seconds:02d}"
+
+            # Get model name
+            model = rec.get('model', 'onbekend')
+
+            # Create item text with duration and model
+            item_text = f"🎵 {rec['name']}\n📅 {rec['date']} • ⏱️ {duration_str} • 🤖 {model}"
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, rec['id'])
             self.recording_list.addItem(item)
@@ -689,6 +851,11 @@ class TranscriptionApp(QMainWindow):
         self.transcription_text.clear()
         self.summary_text.clear()
 
+        # Reset segment tracking
+        self.segments_to_transcribe = []
+        self.transcribed_segments = []
+        self.is_transcribing_segment = False
+
         self.record_btn.setText("■ Opname Stoppen")
         self.record_btn.setStyleSheet("""
             QPushButton {
@@ -702,7 +869,8 @@ class TranscriptionApp(QMainWindow):
         self.status_label.setText("🔴 Opname bezig...")
         self.status_bar.showMessage("Opname gestart")
 
-        self.recorder.start_recording()
+        # Start recording with segment callback
+        self.recorder.start_recording(segment_callback=self.on_segment_ready)
         self.timer.start(1000)  # Update every second
 
     def stop_recording(self):
@@ -758,11 +926,16 @@ class TranscriptionApp(QMainWindow):
         else:
             recording_name = f"Opname {self.current_recording_id}"
 
+        # Get audio duration
+        duration = self.recording_manager.get_audio_duration(self.current_audio_file)
+
         # Add to manager
         self.recording_manager.add_recording(
             self.current_audio_file,
             self.current_recording_id,
-            name=recording_name
+            name=recording_name,
+            duration=duration,
+            model=self.selected_model_name
         )
 
         # Refresh list
@@ -777,6 +950,212 @@ class TranscriptionApp(QMainWindow):
         minutes = self.recording_time // 60
         seconds = self.recording_time % 60
         self.timer_label.setText(f"{minutes:02d}:{seconds:02d}")
+
+    def on_segment_ready(self, segment_file, segment_num):
+        """Called when a new 30-second segment is ready"""
+        print(f"DEBUG: Segment {segment_num} ready: {segment_file}")
+        self.segments_to_transcribe.append((segment_file, segment_num))
+
+        # Start transcribing if not already doing so
+        if not self.is_transcribing_segment:
+            self.transcribe_next_segment()
+
+    def transcribe_next_segment(self):
+        """Transcribe the next segment in the queue"""
+        if not self.segments_to_transcribe:
+            self.is_transcribing_segment = False
+            return
+
+        # Get model
+        model_name = self.selected_model_name
+        if model_name not in self.loaded_models:
+            # Model not loaded yet, wait
+            print(f"DEBUG: Model {model_name} not loaded yet, waiting...")
+            self.is_transcribing_segment = False
+            return
+
+        model = self.loaded_models[model_name]
+        self.is_transcribing_segment = True
+
+        # Get next segment
+        segment_file, segment_num = self.segments_to_transcribe.pop(0)
+
+        def worker():
+            try:
+                print(f"DEBUG: Transcribing segment {segment_num}: {segment_file}")
+                result = model.transcribe(
+                    segment_file,
+                    language="nl",
+                    task="transcribe",
+                    fp16=False
+                )
+
+                segment_text = result.get('text', '').strip()
+                print(f"DEBUG: Segment {segment_num} transcribed: {segment_text[:50]}...")
+
+                # Emit signal with transcribed text
+                self.segment_transcribed.emit(segment_text)
+
+            except Exception as e:
+                print(f"ERROR transcribing segment {segment_num}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    def remove_overlap(self, previous_text, new_text):
+        """Remove overlapping text between segments"""
+        if not previous_text or not new_text:
+            return new_text
+
+        # Split into words
+        prev_words = previous_text.split()
+        new_words = new_text.split()
+
+        # Look for overlap at the end of previous and beginning of new
+        # Check up to 50 words (covers ~15 seconds at normal speech rate)
+        max_overlap = min(50, len(prev_words), len(new_words))
+
+        best_overlap_length = 0
+        for overlap_len in range(max_overlap, 0, -1):
+            # Get last N words from previous text
+            prev_tail = prev_words[-overlap_len:]
+            # Get first N words from new text
+            new_head = new_words[:overlap_len]
+
+            # Calculate similarity (allow for some transcription variations)
+            matches = sum(1 for p, n in zip(prev_tail, new_head) if p.lower() == n.lower())
+            similarity = matches / overlap_len
+
+            # If 70% or more words match, consider it an overlap
+            if similarity >= 0.7:
+                best_overlap_length = overlap_len
+                print(f"DEBUG: Found overlap of {overlap_len} words with {similarity:.1%} similarity")
+                break
+
+        # Remove the overlapping portion from the new text
+        if best_overlap_length > 0:
+            deduplicated = " ".join(new_words[best_overlap_length:])
+            print(f"DEBUG: Removed {best_overlap_length} overlapping words")
+            return deduplicated
+        else:
+            return new_text
+
+    def on_segment_transcribed(self, segment_text):
+        """Handle segment transcription completion"""
+        print(f"DEBUG: on_segment_transcribed called")
+
+        # Remove overlap with previous segment
+        if self.transcribed_segments:
+            previous_text = self.transcribed_segments[-1]
+            segment_text = self.remove_overlap(previous_text, segment_text)
+
+        # Only add if there's text left after deduplication
+        if segment_text.strip():
+            self.transcribed_segments.append(segment_text)
+
+        # Update UI with concatenated text
+        full_text = " ".join(self.transcribed_segments)
+        self.transcription_text.setPlainText(full_text)
+
+        print(f"DEBUG: Updated transcription display ({len(self.transcribed_segments)} segments)")
+
+        # Generate incremental summary with current transcription
+        print(f"DEBUG: Generating incremental summary after segment")
+        self.generate_summary(full_text)
+
+        # Mark as not transcribing and process next segment
+        self.is_transcribing_segment = False
+        self.transcribe_next_segment()
+
+        # Check if all segments are done
+        if not self.segments_to_transcribe and not self.is_transcribing_segment:
+            print(f"DEBUG: All segments transcribed, saving to database")
+            # All segments complete - save transcription and model to database
+            self.recording_manager.update_recording(
+                self.current_recording_id,
+                transcription=full_text,
+                model=self.selected_model_name
+            )
+            # Refresh list to show updated model
+            self.refresh_recording_list()
+            print(f"DEBUG: Model {self.selected_model_name} saved for recording {self.current_recording_id}")
+
+    def retranscribe_with_segments(self):
+        """Split existing recording into segments and transcribe incrementally"""
+        print(f"DEBUG: Starting segmented retranscription of {self.current_audio_file}")
+
+        # Split audio file into 30-second segments with 15-second overlap
+        def split_audio():
+            try:
+                import wave
+                import numpy as np
+
+                # Open the audio file
+                with wave.open(self.current_audio_file, 'rb') as wf:
+                    sample_rate = wf.getframerate()
+                    num_channels = wf.getnchannels()
+                    sample_width = wf.getsampwidth()
+                    total_frames = wf.getnframes()
+
+                    # Read all audio data
+                    audio_data = wf.readframes(total_frames)
+
+                # Calculate segment sizes using app settings
+                segment_duration = self.segment_duration  # seconds
+                overlap_duration = self.overlap_duration  # seconds
+                frames_per_segment = int(sample_rate * segment_duration)
+                frames_per_overlap = int(sample_rate * overlap_duration)
+                bytes_per_frame = sample_width * num_channels
+
+                # Create segments directory
+                timestamp = Path(self.current_audio_file).stem.replace("recording_", "")
+                segments_dir = Path(f"recordings/segments_{timestamp}")
+                segments_dir.mkdir(parents=True, exist_ok=True)
+
+                segment_num = 0
+                offset = 0
+                segment_files = []
+
+                while offset < len(audio_data):
+                    # Calculate segment boundaries
+                    segment_start = offset
+                    segment_end = min(offset + frames_per_segment * bytes_per_frame, len(audio_data))
+
+                    # Extract segment data
+                    segment_data = audio_data[segment_start:segment_end]
+
+                    # Save segment
+                    segment_filename = segments_dir / f"segment_{segment_num:03d}.wav"
+                    with wave.open(str(segment_filename), 'wb') as seg_wf:
+                        seg_wf.setnchannels(num_channels)
+                        seg_wf.setsampwidth(sample_width)
+                        seg_wf.setframerate(sample_rate)
+                        seg_wf.writeframes(segment_data)
+
+                    print(f"DEBUG: Created segment {segment_num}: {segment_filename}")
+                    segment_files.append((str(segment_filename), segment_num))
+
+                    # Move forward by (segment_duration - overlap_duration) seconds
+                    offset += (frames_per_segment - frames_per_overlap) * bytes_per_frame
+                    segment_num += 1
+
+                # Queue segments for transcription
+                self.segments_to_transcribe = segment_files
+                print(f"DEBUG: Created {len(segment_files)} segments, starting transcription...")
+
+                # Start transcribing
+                self.transcribe_next_segment()
+
+            except Exception as e:
+                print(f"ERROR splitting audio: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Run in thread
+        thread = threading.Thread(target=split_audio, daemon=True)
+        thread.start()
 
     def transcribe_audio(self):
         """Transcribe audio using Whisper"""
@@ -812,26 +1191,15 @@ class TranscriptionApp(QMainWindow):
             try:
                 print(f"DEBUG: Worker thread started with {self.selected_model_name} model")
 
-                # Step 1: Transcribe with Whisper (with word timestamps for speaker alignment)
+                # Transcribe with Whisper
                 print(f"DEBUG: Starting Whisper transcription...")
                 result = model.transcribe(
                     self.current_audio_file,
                     language="nl",
                     task="transcribe",
-                    fp16=False,
-                    word_timestamps=True  # Get word-level timestamps
+                    fp16=False
                 )
                 print(f"DEBUG: Transcription completed!")
-
-                # Step 2: Speaker diarization if enabled
-                if self.enable_diarization and self.diarization_pipeline:
-                    print(f"DEBUG: Running speaker diarization...")
-                    formatted_text = self.apply_speaker_diarization(result)
-                    result['formatted_text'] = formatted_text
-                    print(f"DEBUG: Diarization completed!")
-                else:
-                    print(f"DEBUG: Speaker diarization disabled, using plain text")
-                    result['formatted_text'] = result.get('text', '')
 
                 # Emit signal to update UI in main thread
                 print(f"DEBUG: Emitting transcription_complete signal")
@@ -849,49 +1217,6 @@ class TranscriptionApp(QMainWindow):
         thread.start()
         print(f"DEBUG: Worker thread started")
 
-    def apply_speaker_diarization(self, whisper_result):
-        """Apply speaker diarization and align with transcription"""
-        try:
-            # Run diarization on audio file
-            print(f"DEBUG: Running diarization on {self.current_audio_file}")
-            diarization = self.diarization_pipeline(self.current_audio_file)
-
-            # Get segments with speaker info
-            segments = whisper_result.get('segments', [])
-            formatted = []
-
-            for segment in segments:
-                start = segment.get('start', 0)
-                end = segment.get('end', 0)
-                text = segment.get('text', '').strip()
-
-                # Find which speaker is active at this time
-                speaker = self.get_speaker_at_time(diarization, start, end)
-
-                if speaker:
-                    formatted.append(f"[{speaker}]: {text}")
-                else:
-                    formatted.append(f"[Onbekend]: {text}")
-
-            return "\n\n".join(formatted)
-
-        except Exception as e:
-            print(f"ERROR in diarization: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback to plain text
-            return whisper_result.get('text', '')
-
-    def get_speaker_at_time(self, diarization, start, end):
-        """Get the speaker who is active during the given time range"""
-        mid_point = (start + end) / 2
-
-        for turn, _, speaker in diarization.itertracks(yield_label=True):
-            if turn.start <= mid_point <= turn.end:
-                return f"Spreker {speaker}"
-
-        return None
-
     def on_transcription_complete(self, result):
         """Handle transcription completion in main thread (slot)"""
         print(f"DEBUG: on_transcription_complete called with result type: {type(result)}")
@@ -902,88 +1227,85 @@ class TranscriptionApp(QMainWindow):
             self.status_label.setText(f"Fout: {result['error']}")
             self.status_bar.showMessage(f"Transcriptie fout: {result['error']}")
         else:
-            # Use formatted text with speakers if available
-            formatted_text = result.get("formatted_text", "")
-            plain_text = result.get("text", "")
+            # Get transcription text
+            transcription_text = result.get("text", "")
 
-            # Use formatted version for display
-            display_text = formatted_text if formatted_text else plain_text
-
-            print(f"DEBUG: Setting transcription text (length={len(display_text)}): {display_text[:100]}...")
+            print(f"DEBUG: Setting transcription text (length={len(transcription_text)}): {transcription_text[:100]}...")
 
             # Update UI
             self.transcription_text.clear()
-            self.transcription_text.setPlainText(display_text)
+            self.transcription_text.setPlainText(transcription_text)
 
             print(f"DEBUG: Text set in UI, updating labels")
-            if self.enable_diarization and self.diarization_pipeline:
-                self.status_label.setText("✅ Transcriptie + speakers voltooid")
-                self.status_bar.showMessage("Transcriptie met speaker herkenning voltooid")
-            else:
-                self.status_label.setText("✅ Transcriptie voltooid")
-                self.status_bar.showMessage("Transcriptie succesvol voltooid")
+            self.status_label.setText("✅ Transcriptie voltooid")
+            self.status_bar.showMessage("Transcriptie succesvol voltooid")
 
-            # Update recording with transcription (use plain text for summary)
+            # Update recording with transcription
             print(f"DEBUG: Updating recording in database")
             self.recording_manager.update_recording(
                 self.current_recording_id,
-                transcription=display_text
+                transcription=transcription_text,
+                model=self.selected_model_name
             )
 
-            # Generate summary (use plain text)
+            # Refresh the recording list to show updated model
+            self.refresh_recording_list()
+
+            # Generate summary
             print(f"DEBUG: Generating summary")
-            self.generate_summary(plain_text)
+            self.generate_summary(transcription_text)
 
         self.record_btn.setEnabled(True)
         print(f"DEBUG: on_transcription_complete finished")
 
     def generate_summary(self, text):
-        """Generate a summary of the transcription"""
-        self.status_label.setText("Samenvatting genereren...")
+        """Generate a summary of the transcription using Azure OpenAI"""
+        if not text or not text.strip():
+            print("DEBUG: No text to summarize")
+            return
+
+        self.status_label.setText("Samenvatting genereren met AI...")
 
         def worker():
             try:
                 print(f"DEBUG: Summary worker started")
-                # Simple extractive summary: take first few sentences and key points
-                sentences = text.split('. ')
 
-                # Word frequency for key topics
-                words = text.lower().split()
-                word_freq = {}
-                stop_words = {'de', 'het', 'een', 'en', 'is', 'van', 'in', 'te', 'dat', 'op', 'voor', 'met', 'als', 'zijn', 'er', 'maar', 'om', 'hij', 'ze', 'aan', 'werd', 'ook', 'tot', 'die', 'dit', 'bij', 'zo', 'deze', 'naar', 'door'}
+                # Check if Azure client is available
+                if not self.azure_client:
+                    print("WARNING: Azure OpenAI client not available, skipping summary")
+                    self.summary_complete.emit("Azure OpenAI niet beschikbaar voor samenvattingen")
+                    return
 
-                for word in words:
-                    word = word.strip('.,!?;:').lower()
-                    if len(word) > 3 and word not in stop_words:
-                        word_freq[word] = word_freq.get(word, 0) + 1
+                # Get model name from env
+                model_name = os.getenv('AZURE_OPENAI_MODEL', 'gpt-4o')
 
-                # Get top keywords
-                top_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:10]
-                keywords = [word for word, freq in top_words]
+                # Create prompt for Azure OpenAI using configured prompt
+                prompt = f"{self.summary_prompt}\n\n{text}"
 
-                # Build summary
-                summary = "**Belangrijkste punten:**\n\n"
+                print(f"DEBUG: Calling Azure OpenAI with model {model_name}")
 
-                # Add first sentence as intro
-                if sentences:
-                    summary += f"• {sentences[0].strip()}.\n\n"
+                # Call Azure OpenAI
+                response = self.azure_client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "Je bent een assistent die samenvattingen maakt van transcripties van vergaderingen en gesprekken in het Nederlands."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
 
-                # Add statistics
-                word_count = len(words)
-                sentence_count = len([s for s in sentences if s.strip()])
-                summary += f"**Statistieken:**\n"
-                summary += f"• Aantal woorden: {word_count}\n"
-                summary += f"• Aantal zinnen: {sentence_count}\n\n"
+                # Extract summary from response
+                summary = response.choices[0].message.content.strip()
+                print(f"DEBUG: Summary generated by Azure OpenAI (length={len(summary)})")
 
-                # Add keywords
-                summary += f"**Kernwoorden:**\n"
-                summary += ", ".join(keywords[:8])
-
-                print(f"DEBUG: Summary generated, emitting signal")
                 # Emit signal to update UI
                 self.summary_complete.emit(summary)
 
             except Exception as e:
+                print(f"ERROR generating summary: {e}")
+                import traceback
+                traceback.print_exc()
                 self.summary_complete.emit(f"Fout bij samenvatting: {str(e)}")
 
         thread = threading.Thread(target=worker, daemon=True)
@@ -1147,9 +1469,18 @@ class TranscriptionApp(QMainWindow):
                 QMessageBox.warning(self, "Fout", f"Audio bestand niet gevonden: {self.current_audio_file}")
                 return
 
-            # Start transcription
+            # Clear transcription display
+            self.transcription_text.clear()
+            self.summary_text.clear()
+
+            # Reset segment tracking
+            self.segments_to_transcribe = []
+            self.transcribed_segments = []
+            self.is_transcribing_segment = False
+
+            # Start segmented transcription
             self.status_bar.showMessage(f"Hertranscriberen van '{recording['name']}'...")
-            self.transcribe_audio()
+            self.retranscribe_with_segments()
 
     def delete_recordings(self):
         """Delete selected recording(s)"""
@@ -1214,27 +1545,96 @@ class TranscriptionApp(QMainWindow):
             else:
                 self.status_bar.showMessage(f"{deleted_count} opnames verwijderd")
 
+    def apply_settings(self):
+        """Apply settings from the Settings tab"""
+        # Get values from UI
+        segment_duration = self.segment_duration_spin.value()
+        overlap_duration = self.overlap_duration_spin.value()
+        summary_prompt = self.summary_prompt_text.toPlainText()
+
+        # Validate: overlap must be less than segment duration
+        if overlap_duration >= segment_duration:
+            QMessageBox.warning(
+                self,
+                "Ongeldige Instellingen",
+                f"Overlap ({overlap_duration}s) moet kleiner zijn dan de fragmentlengte ({segment_duration}s).\n\n"
+                f"Pas de waardes aan zodat overlap < fragmentlengte."
+            )
+            return
+
+        # Apply settings
+        self.segment_duration = segment_duration
+        self.overlap_duration = overlap_duration
+        self.summary_prompt = summary_prompt
+
+        # Update AudioRecorder settings
+        self.recorder.segment_duration = segment_duration
+        self.recorder.overlap_duration = overlap_duration
+
+        # Show confirmation
+        self.status_bar.showMessage(
+            f"Instellingen toegepast: {segment_duration}s fragmenten, {overlap_duration}s overlap"
+        )
+
+        QMessageBox.information(
+            self,
+            "Instellingen Toegepast",
+            f"De volgende instellingen zijn opgeslagen:\n\n"
+            f"• Fragmentlengte: {segment_duration} seconden\n"
+            f"• Overlap: {overlap_duration} seconden\n"
+            f"• Samenvatting prompt aangepast\n\n"
+            f"Deze worden gebruikt voor alle nieuwe opnames en hertranscripties."
+        )
+
     def closeEvent(self, event):
         """Clean up on close"""
-        self.recorder.cleanup()
+        print("DEBUG: closeEvent called, cleaning up...")
+
+        # Stop recording if active
+        if self.is_recording:
+            print("DEBUG: Stopping active recording...")
+            self.is_recording = False
+            self.timer.stop()
+
+        # Clean up recorder
+        try:
+            self.recorder.cleanup()
+        except Exception as e:
+            print(f"Error cleaning up recorder: {e}")
 
         # Stop any playback
-        if self.playback_process and self.playback_process.poll() is None:
-            self.playback_process.terminate()
-            self.playback_process.wait()
+        try:
+            if self.playback_process and self.playback_process.poll() is None:
+                self.playback_process.terminate()
+                self.playback_process.wait()
+        except Exception as e:
+            print(f"Error stopping playback: {e}")
 
+        print("DEBUG: Cleanup complete, accepting close event")
         event.accept()
 
 
 def main():
     """Main application entry point"""
+    import signal
+
+    # Handle Ctrl+C gracefully
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
+
+    # Set quit on last window closed
+    app.setQuitOnLastWindowClosed(True)
 
     window = TranscriptionApp()
     window.show()
 
-    sys.exit(app.exec())
+    # Run the application
+    exit_code = app.exec()
+
+    print("DEBUG: Application exiting cleanly")
+    sys.exit(exit_code)
 
 
 if __name__ == '__main__':
