@@ -719,10 +719,23 @@ Hier volgt de tekst:"""
         summary_layout = QVBoxLayout(summary_widget)
         summary_layout.setContentsMargins(15, 15, 15, 15)
 
+        # Header with refresh button
+        summary_header_layout = QHBoxLayout()
+
         summary_label = QLabel("📊 Samenvatting")
         summary_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         summary_label.setStyleSheet("color: #1976D2;")
-        summary_layout.addWidget(summary_label)
+        summary_header_layout.addWidget(summary_label)
+
+        summary_header_layout.addStretch()
+
+        self.refresh_summary_btn = QPushButton("🔄 Ververs Samenvatting")
+        self.refresh_summary_btn.setMinimumHeight(35)
+        self.refresh_summary_btn.clicked.connect(self.refresh_summary)
+        self.refresh_summary_btn.setEnabled(False)
+        summary_header_layout.addWidget(self.refresh_summary_btn)
+
+        summary_layout.addLayout(summary_header_layout)
 
         self.summary_text = QTextEdit()
         self.summary_text.setPlaceholderText("Samenvatting verschijnt hier na de transcriptie...")
@@ -1008,6 +1021,9 @@ Hier volgt de tekst:"""
         self.is_generating_summary = False
         self.pending_summary_needed = False
 
+        # Disable refresh summary button
+        self.refresh_summary_btn.setEnabled(False)
+
         self.record_btn.setText("■ Opname Stoppen")
         self.record_btn.setStyleSheet("""
             QPushButton {
@@ -1219,9 +1235,9 @@ Hier volgt de tekst:"""
 
         print(f"DEBUG: Updated transcription display ({len(self.transcribed_segments)} segments)")
 
-        # Generate incremental summary with current transcription
-        print(f"DEBUG: Generating incremental summary after segment")
-        self.generate_summary(full_text)
+        # Enable refresh summary button if there's text
+        if full_text.strip():
+            self.refresh_summary_btn.setEnabled(True)
 
         # Mark as not transcribing and process next segment
         self.is_transcribing_segment = False
@@ -1246,8 +1262,8 @@ Hier volgt de tekst:"""
             self.refresh_recording_list()
             print(f"DEBUG: Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
 
-            # Ensure a final summary is generated
-            print(f"DEBUG: All segments done, ensuring final summary is generated")
+            # Generate final summary at the end of recording
+            print(f"DEBUG: All segments done, generating final summary")
             if self.is_generating_summary:
                 # Mark that we need a final summary after current one completes
                 self.pending_summary_needed = True
@@ -1408,6 +1424,9 @@ Hier volgt de tekst:"""
             # Update UI
             self.transcription_text.clear()
             self.transcription_text.setPlainText(transcription_text)
+
+            # Enable refresh summary button
+            self.refresh_summary_btn.setEnabled(True)
 
             print(f"DEBUG: Text set in UI, updating labels")
             self.status_label.setText("✅ Transcriptie voltooid")
@@ -1601,8 +1620,12 @@ Hier volgt de tekst:"""
         if recording:
             self.current_recording_id = recording_id
             self.current_audio_file = recording['audio_file']
-            self.transcription_text.setPlainText(recording.get('transcription', ''))
+            transcription = recording.get('transcription', '')
+            self.transcription_text.setPlainText(transcription)
             self.summary_text.setPlainText(recording.get('summary', ''))
+
+            # Enable/disable refresh summary button based on transcription
+            self.refresh_summary_btn.setEnabled(bool(transcription.strip()))
 
             # Load all settings from the recording
             # Whisper model
@@ -1767,9 +1790,37 @@ Hier volgt de tekst:"""
             self.transcribed_segments = []
             self.is_transcribing_segment = False
 
+            # Disable refresh summary button during retranscription
+            self.refresh_summary_btn.setEnabled(False)
+
             # Start segmented transcription
             self.status_bar.showMessage(f"Hertranscriberen van '{recording['name']}'...")
             self.retranscribe_with_segments()
+
+    def refresh_summary(self):
+        """Refresh summary based on current transcription"""
+        # Get current transcription text
+        transcription = self.transcription_text.toPlainText().strip()
+
+        if not transcription:
+            QMessageBox.warning(
+                self,
+                "Geen Transcriptie",
+                "Er is geen transcriptie beschikbaar om samen te vatten."
+            )
+            return
+
+        # Clear summary and generate new one
+        self.summary_text.clear()
+        self.summary_text.setPlainText("Samenvatting wordt gegenereerd...")
+
+        # Switch to summary tab to show progress
+        self.tabs.setCurrentIndex(1)  # Index 1 is the summary tab
+
+        # Generate summary with current settings
+        self.status_bar.showMessage("Samenvatting genereren...")
+        self.status_label.setText("Samenvatting genereren...")
+        self.generate_summary(transcription)
 
     def extract_summary(self):
         """Regenerate summary for the selected recording using current settings"""
