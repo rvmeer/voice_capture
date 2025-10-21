@@ -546,6 +546,17 @@ Hier volgt de tekst:"""
         self.retranscribe_btn.setEnabled(False)
         list_btn_layout2.addWidget(self.retranscribe_btn)
 
+        self.extract_btn = QPushButton("📊 Extract")
+        self.extract_btn.clicked.connect(self.extract_summary)
+        self.extract_btn.setEnabled(False)
+        list_btn_layout2.addWidget(self.extract_btn)
+
+        left_layout.addLayout(list_btn_layout2)
+
+        # List action buttons - Row 3
+        list_btn_layout3 = QHBoxLayout()
+        list_btn_layout3.setSpacing(10)
+
         self.delete_btn = QPushButton("🗑️ Verwijderen")
         self.delete_btn.setStyleSheet("""
             QPushButton {
@@ -1556,16 +1567,25 @@ Hier volgt de tekst:"""
             self.play_btn.setEnabled(False)
             self.rename_btn.setEnabled(False)
             self.retranscribe_btn.setEnabled(False)
+            self.extract_btn.setEnabled(False)
             self.delete_btn.setEnabled(False)
         elif num_selected == 1:
             self.play_btn.setEnabled(True)
             self.rename_btn.setEnabled(True)
             self.retranscribe_btn.setEnabled(True)
+
+            # Enable extract button only if transcription exists
+            recording_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+            recording = self.recording_manager.get_recording(recording_id)
+            has_transcription = bool(recording and recording.get('transcription', '').strip())
+            self.extract_btn.setEnabled(has_transcription)
+
             self.delete_btn.setEnabled(True)
         else:  # Multiple selections
             self.play_btn.setEnabled(False)
             self.rename_btn.setEnabled(False)
             self.retranscribe_btn.setEnabled(False)
+            self.extract_btn.setEnabled(False)
             self.delete_btn.setEnabled(True)
 
     def load_recording(self, item):
@@ -1750,6 +1770,66 @@ Hier volgt de tekst:"""
             # Start segmented transcription
             self.status_bar.showMessage(f"Hertranscriberen van '{recording['name']}'...")
             self.retranscribe_with_segments()
+
+    def extract_summary(self):
+        """Regenerate summary for the selected recording using current settings"""
+        selected_items = self.recording_list.selectedItems()
+        if len(selected_items) != 1:
+            return
+
+        recording_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        recording = self.recording_manager.get_recording(recording_id)
+
+        if not recording:
+            return
+
+        # Check if transcription exists
+        transcription = recording.get('transcription', '').strip()
+        if not transcription:
+            QMessageBox.warning(
+                self,
+                "Geen Transcriptie",
+                f"Opname '{recording['name']}' heeft geen transcriptie.\n\nTranscribeer eerst de opname voordat je een samenvatting kunt genereren."
+            )
+            return
+
+        # Confirm extract
+        ai_provider = recording.get('ai_provider', 'azure')
+        if ai_provider == 'ollama':
+            ollama_model = recording.get('ollama_model', 'onbekend')
+            provider_name = f"Ollama ({ollama_model})"
+        else:
+            provider_name = "Azure OpenAI"
+
+        reply = QMessageBox.question(
+            self,
+            "Samenvatting Regenereren",
+            f"Wil je de samenvatting voor '{recording['name']}' opnieuw genereren met {provider_name}?\n\nDe huidige samenvatting wordt overschreven.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Set current recording
+            self.current_recording_id = recording_id
+            self.current_audio_file = recording['audio_file']
+
+            # Load settings from recording (they are already loaded when the recording was selected)
+            # These are already in self.ai_provider, self.summary_prompt, etc.
+
+            # Clear summary display
+            self.summary_text.clear()
+            self.summary_text.setPlainText("Samenvatting wordt gegenereerd...")
+
+            # Generate new summary using existing transcription
+            self.status_bar.showMessage(f"Samenvatting regenereren voor '{recording['name']}'...")
+            self.status_label.setText("Samenvatting genereren...")
+
+            # Switch to summary tab to show progress
+            self.tabs.setCurrentIndex(1)  # Index 1 is the summary tab
+
+            # Generate summary with current settings
+            self.generate_summary(transcription)
 
     def delete_recordings(self):
         """Delete selected recording(s)"""
