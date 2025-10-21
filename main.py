@@ -30,10 +30,36 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit, QLabel, QStatusBar, QProgressBar, QTabWidget,
     QListWidget, QListWidgetItem, QInputDialog, QMessageBox, QSplitter,
     QRadioButton, QButtonGroup, QGroupBox, QCheckBox, QSpinBox, QFormLayout,
-    QComboBox, QLineEdit, QScrollArea
+    QComboBox, QLineEdit, QScrollArea, QSystemTrayIcon, QMenu
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QPalette, QColor, QIcon
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QSize
+from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPainter, QPixmap, QPen
+
+
+def create_tray_icon(recording=False):
+    """Create a tray icon - open circle when idle, filled red circle when recording"""
+    # Create a 22x22 pixmap (standard size for macOS menu bar icons)
+    pixmap = QPixmap(22, 22)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    if recording:
+        # Filled red circle when recording
+        painter.setBrush(QColor(244, 67, 54))  # Red color
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(3, 3, 16, 16)
+    else:
+        # Empty circle outline when idle
+        pen = QPen(QColor(100, 100, 100))  # Dark gray
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(3, 3, 16, 16)
+
+    painter.end()
+    return QIcon(pixmap)
 
 
 class TranscriptionApp(QMainWindow):
@@ -115,10 +141,128 @@ Hier volgt de tekst:"""
         self.init_azure_client()
 
         self.init_ui()
+        self.init_tray_icon()
         self.refresh_recording_list()
 
         # Load default model (tiny) on startup
         QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
+
+    def init_tray_icon(self):
+        """Initialize system tray icon"""
+        # Create system tray icon
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(create_tray_icon(recording=False))
+
+        # Create context menu for tray icon
+        tray_menu = QMenu()
+
+        # Add toggle recording action
+        self.tray_toggle_action = tray_menu.addAction("Start Opname")
+        self.tray_toggle_action.triggered.connect(self.tray_toggle_recording)
+
+        tray_menu.addSeparator()
+
+        # Add show window action
+        show_action = tray_menu.addAction("Toon Venster")
+        show_action.triggered.connect(self.show)
+
+        # Add quit action
+        quit_action = tray_menu.addAction("Afsluiten")
+        quit_action.triggered.connect(self.quit_application)
+
+        self.tray_icon.setContextMenu(tray_menu)
+
+        # Handle tray icon click (left-click toggles recording)
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
+
+        # Show the tray icon
+        self.tray_icon.show()
+
+    def on_tray_icon_activated(self, reason):
+        """Handle tray icon activation (click)"""
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:  # Left click
+            self.tray_toggle_recording()
+
+    def tray_toggle_recording(self):
+        """Toggle recording from tray icon"""
+        if not self.is_recording:
+            self.tray_start_recording()
+        else:
+            self.tray_stop_recording()
+
+    def tray_start_recording(self):
+        """Start recording from tray icon (without showing dialog)"""
+        # Start the recording
+        self.start_recording()
+
+        # Update tray icon to red filled circle
+        self.tray_icon.setIcon(create_tray_icon(recording=True))
+        self.tray_toggle_action.setText("Stop Opname")
+
+        # Show notification
+        self.tray_icon.showMessage(
+            "Opname Gestart",
+            "Audio opname is gestart",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+
+    def tray_stop_recording(self):
+        """Stop recording from tray icon (auto-save without dialog)"""
+        self.is_recording = False
+        self.timer.stop()
+
+        # Update tray icon back to empty circle
+        self.tray_icon.setIcon(create_tray_icon(recording=False))
+        self.tray_toggle_action.setText("Start Opname")
+
+        # Save recording in background
+        def save_and_transcribe():
+            try:
+                self.current_audio_file, self.current_recording_id = self.recorder.stop_recording()
+
+                # Auto-generate name based on timestamp
+                recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+                # Get audio duration
+                duration = self.recording_manager.get_audio_duration(self.current_audio_file)
+
+                # Add to manager with all current settings
+                self.recording_manager.add_recording(
+                    self.current_audio_file,
+                    self.current_recording_id,
+                    name=recording_name,
+                    duration=duration,
+                    model=self.selected_model_name,
+                    ai_provider=self.ai_provider,
+                    segment_duration=self.segment_duration,
+                    overlap_duration=self.overlap_duration,
+                    ollama_url=self.ollama_url,
+                    ollama_model=self.ollama_model,
+                    summary_prompt=self.summary_prompt
+                )
+
+                # Refresh list
+                self.refresh_recording_list()
+
+                # Show notification
+                self.tray_icon.showMessage(
+                    "Opname Opgeslagen",
+                    f"Opname opgeslagen als '{recording_name}'",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2000
+                )
+
+                # Start transcription in background
+                self.transcribe_audio()
+
+            except Exception as e:
+                print(f"Error in tray save_and_transcribe: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Delay the save operation to let audio thread cleanup
+        QTimer.singleShot(100, save_and_transcribe)
 
     def init_azure_client(self):
         """Initialize Azure OpenAI client"""
@@ -1860,8 +2004,31 @@ Hier volgt de tekst:"""
         )
 
     def closeEvent(self, event):
-        """Clean up on close"""
-        print("DEBUG: closeEvent called, cleaning up...")
+        """Handle window close - minimize to tray instead of quitting"""
+        # If tray icon exists, minimize to tray instead of closing
+        if hasattr(self, 'tray_icon') and self.tray_icon.isVisible():
+            self.hide()
+            event.ignore()
+            # Show notification
+            self.tray_icon.showMessage(
+                "Applicatie Verborgen",
+                "De applicatie draait nog in de achtergrond. Klik op het icoon om het venster te tonen.",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+        else:
+            # Actually closing - clean up
+            self.cleanup_and_quit()
+            event.accept()
+
+    def quit_application(self):
+        """Quit the application properly"""
+        self.cleanup_and_quit()
+        QApplication.quit()
+
+    def cleanup_and_quit(self):
+        """Clean up resources before quitting"""
+        print("DEBUG: cleanup_and_quit called")
 
         # Stop recording if active
         if self.is_recording:
@@ -1883,8 +2050,7 @@ Hier volgt de tekst:"""
         except Exception as e:
             print(f"Error stopping playback: {e}")
 
-        print("DEBUG: Cleanup complete, accepting close event")
-        event.accept()
+        print("DEBUG: Cleanup complete")
 
 
 def main():
@@ -1897,8 +2063,8 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
-    # Set quit on last window closed
-    app.setQuitOnLastWindowClosed(True)
+    # Don't quit when last window closed (keeps tray icon running)
+    app.setQuitOnLastWindowClosed(False)
 
     window = TranscriptionApp()
     window.show()
