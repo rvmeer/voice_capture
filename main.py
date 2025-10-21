@@ -7,14 +7,12 @@ Professional GUI for recording, transcribing, and summarizing audio with history
 import sys
 import os
 import wave
-import json
 import threading
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-import pyaudio
 import whisper
 import numpy as np
 from openai import AzureOpenAI, OpenAI
@@ -22,6 +20,11 @@ import requests
 
 # Load environment variables
 load_dotenv()
+
+# Import custom modules
+from audio_recorder import AudioRecorder
+from recording_manager import RecordingManager
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTextEdit, QLabel, QStatusBar, QProgressBar, QTabWidget,
@@ -31,282 +34,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QPalette, QColor, QIcon
-
-
-class AudioRecorder:
-    """Handles audio recording functionality"""
-
-    def __init__(self):
-        self.CHUNK = 1024
-        self.FORMAT = pyaudio.paInt16
-        self.CHANNELS = 1
-        self.RATE = 16000
-        self.frames = []
-        self.is_recording = False
-        self.audio = pyaudio.PyAudio()
-        self.stream = None
-
-        # For 30-second segments with 15-second overlap
-        self.segment_duration = 30  # seconds
-        self.overlap_duration = 15  # seconds
-        self.segment_callback = None  # Callback function for segment ready
-        self.segment_counter = 0
-        self.recording_timestamp = None
-        self.all_frames = []  # Keep all frames for complete recording
-
-    def start_recording(self, segment_callback=None):
-        """Start recording audio from microphone"""
-        self.frames = []
-        self.all_frames = []  # Reset complete recording
-        self.is_recording = True
-        self.segment_callback = segment_callback
-        self.segment_counter = 0
-        self.recording_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        self.stream = self.audio.open(
-            format=self.FORMAT,
-            channels=self.CHANNELS,
-            rate=self.RATE,
-            input=True,
-            frames_per_buffer=self.CHUNK
-        )
-
-        def record():
-            frames_per_segment = int(self.RATE * self.segment_duration / self.CHUNK)
-            frames_for_overlap = int(self.RATE * self.overlap_duration / self.CHUNK)
-
-            while self.is_recording:
-                try:
-                    data = self.stream.read(self.CHUNK, exception_on_overflow=False)
-                    self.frames.append(data)
-                    self.all_frames.append(data)  # Also store in complete recording
-
-                    # Check if we have 30 seconds of audio
-                    if len(self.frames) >= frames_per_segment:
-                        # Save 30-second segment
-                        segment_frames = self.frames[:frames_per_segment]
-                        self.save_segment(segment_frames, self.segment_counter)
-
-                        # Keep only last 15 seconds for overlap in segment buffer
-                        self.frames = self.frames[frames_per_segment - frames_for_overlap:]
-                        self.segment_counter += 1
-
-                except Exception as e:
-                    print(f"Recording error: {e}")
-                    break
-
-        self.record_thread = threading.Thread(target=record, daemon=True)
-        self.record_thread.start()
-
-    def save_segment(self, frames, segment_num):
-        """Save a 30-second segment to file"""
-        try:
-            # Create segments directory
-            segments_dir = Path(f"recordings/segments_{self.recording_timestamp}")
-            segments_dir.mkdir(parents=True, exist_ok=True)
-
-            # Save segment file
-            segment_filename = segments_dir / f"segment_{segment_num:03d}.wav"
-            wf = wave.open(str(segment_filename), 'wb')
-            wf.setnchannels(self.CHANNELS)
-            wf.setsampwidth(self.audio.get_sample_size(self.FORMAT))
-            wf.setframerate(self.RATE)
-            wf.writeframes(b''.join(frames))
-            wf.close()
-
-            print(f"DEBUG: Saved segment {segment_num} to {segment_filename}")
-
-            # Call callback if provided
-            if self.segment_callback:
-                self.segment_callback(str(segment_filename), segment_num)
-
-        except Exception as e:
-            print(f"Error saving segment: {e}")
-
-    def stop_recording(self):
-        """Stop recording and return the audio file path"""
-        self.is_recording = False
-
-        # Wait for recording thread to finish
-        if hasattr(self, 'record_thread') and self.record_thread.is_alive():
-            self.record_thread.join(timeout=1.0)
-
-        # Safely close stream
-        try:
-            if self.stream:
-                self.stream.stop_stream()
-                self.stream.close()
-                self.stream = None
-        except Exception as e:
-            print(f"Error closing stream: {e}")
-
-        # Use the recording timestamp from start_recording
-        timestamp = self.recording_timestamp if self.recording_timestamp else datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"recordings/recording_{timestamp}.wav"
-
-        # Create recordings directory if it doesn't exist
-        Path("recordings").mkdir(exist_ok=True)
-
-        # Save the complete recording using all_frames
-        try:
-            wf = wave.open(filename, 'wb')
-            wf.setnchannels(self.CHANNELS)
-            wf.setsampwidth(self.audio.get_sample_size(self.FORMAT))
-            wf.setframerate(self.RATE)
-            wf.writeframes(b''.join(self.all_frames))  # Use all_frames for complete recording
-            wf.close()
-            print(f"DEBUG: Saved complete recording with {len(self.all_frames)} frames to {filename}")
-        except Exception as e:
-            print(f"Error saving recording: {e}")
-
-        return filename, timestamp
-
-    def cleanup(self):
-        """Clean up audio resources"""
-        if self.stream:
-            self.stream.close()
-        self.audio.terminate()
-
-
-class RecordingManager:
-    """Manages recording metadata and storage"""
-
-    def __init__(self, data_file="recordings/recordings.json"):
-        self.data_file = data_file
-        self.recordings = []
-        self.load_recordings()
-
-    def load_recordings(self):
-        """Load recordings from JSON file"""
-        try:
-            if Path(self.data_file).exists():
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    self.recordings = json.load(f)
-
-                # Migrate old recordings to add missing fields
-                needs_save = False
-                default_prompt = """Maak een samenvatting wat hier besproken is. Geef ook de actiepunten.
-Er zijn meerdere personen aan het woord geweest maar dat is niet aangegeven in de tekst,
-probeer dat er zelf uit te halen. Geef het weer in de volgende vorm, waarbij je <blabla> vervangt door
-de juiste informatie. Zet deelnemers in alfabetische volgorde, actiepunten in volgorde van hoe ze aan bod kwamen in
-de tekst. Soms wordt er over personen gesproken maar zijn ze niet aanwezig in de meeting,
-zet ze dan ook niet bij de deelnemers.
-
---- Deelnemers ---
-- <persoon 1> - <Mening van die persoon in 1 zin>
-- <persoon 2> - <Mening van die persoon in 1 zin>
-- etc...
-
---- Samenvatting ---
-<korte samenvatting in 3 zinnen>
-
---- Actiepunten ---
-- <actiepunt 1> -- <verantwoordelijke persoon>
-- <actiepunt 2> -- <verantwoordelijke persoon>
-- etc...
-
-Hier volgt de tekst:"""
-
-                for rec in self.recordings:
-                    changed = False
-
-                    # Add missing summary_prompt
-                    if 'summary_prompt' not in rec:
-                        rec['summary_prompt'] = default_prompt
-                        changed = True
-
-                    # Add missing AI provider settings
-                    if 'ai_provider' not in rec:
-                        rec['ai_provider'] = 'azure'
-                        changed = True
-
-                    if 'segment_duration' not in rec:
-                        rec['segment_duration'] = 30
-                        changed = True
-
-                    if 'overlap_duration' not in rec:
-                        rec['overlap_duration'] = 15
-                        changed = True
-
-                    if 'ollama_url' not in rec:
-                        rec['ollama_url'] = 'http://localhost:11434/v1'
-                        changed = True
-
-                    if 'ollama_model' not in rec:
-                        rec['ollama_model'] = ''
-                        changed = True
-
-                    if changed:
-                        needs_save = True
-
-                # Save if we migrated any recordings
-                if needs_save:
-                    print(f"DEBUG: Migrated {sum(1 for rec in self.recordings if 'summary_prompt' in rec)} recordings with missing fields")
-                    self.save_recordings()
-
-        except Exception as e:
-            print(f"Error loading recordings: {e}")
-            self.recordings = []
-
-    def save_recordings(self):
-        """Save recordings to JSON file"""
-        try:
-            Path("recordings").mkdir(exist_ok=True)
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.recordings, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Error saving recordings: {e}")
-
-    def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model="",
-                      ai_provider="azure", segment_duration=30, overlap_duration=15,
-                      ollama_url="", ollama_model="", summary_prompt=""):
-        """Add a new recording with all settings"""
-        recording = {
-            "id": timestamp,
-            "audio_file": audio_file,
-            "name": name or f"Opname {timestamp}",
-            "date": datetime.strptime(timestamp, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S"),
-            "transcription": transcription,
-            "summary": summary,
-            "duration": duration,  # Duration in seconds
-            "model": model,  # Whisper model used for transcription
-            "ai_provider": ai_provider,  # "azure" or "ollama"
-            "segment_duration": segment_duration,  # Segment length in seconds
-            "overlap_duration": overlap_duration,  # Overlap length in seconds
-            "ollama_url": ollama_url,  # Ollama server URL
-            "ollama_model": ollama_model,  # Ollama model name
-            "summary_prompt": summary_prompt  # Summary prompt text
-        }
-        self.recordings.insert(0, recording)  # Add to beginning
-        self.save_recordings()
-        return recording
-
-    def get_audio_duration(self, audio_file):
-        """Get duration of audio file in seconds"""
-        try:
-            with wave.open(audio_file, 'rb') as wf:
-                frames = wf.getnframes()
-                rate = wf.getframerate()
-                duration = frames / float(rate)
-                return int(duration)
-        except Exception as e:
-            print(f"Error getting audio duration: {e}")
-            return 0
-
-    def update_recording(self, recording_id, **kwargs):
-        """Update recording data"""
-        for rec in self.recordings:
-            if rec["id"] == recording_id:
-                rec.update(kwargs)
-                self.save_recordings()
-                break
-
-    def get_recording(self, recording_id):
-        """Get recording by ID"""
-        for rec in self.recordings:
-            if rec["id"] == recording_id:
-                return rec
-        return None
 
 
 class TranscriptionApp(QMainWindow):

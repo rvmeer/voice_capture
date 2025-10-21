@@ -2,4 +2,4 @@
 recordings/
 env/
 env312/
-
+__pycache__/
