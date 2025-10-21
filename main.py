@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 import pyaudio
 import whisper
 import numpy as np
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -25,7 +26,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTextEdit, QLabel, QStatusBar, QProgressBar, QTabWidget,
     QListWidget, QListWidgetItem, QInputDialog, QMessageBox, QSplitter,
-    QRadioButton, QButtonGroup, QGroupBox, QCheckBox, QSpinBox, QFormLayout
+    QRadioButton, QButtonGroup, QGroupBox, QCheckBox, QSpinBox, QFormLayout,
+    QComboBox, QLineEdit, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QPalette, QColor, QIcon
@@ -180,6 +182,68 @@ class RecordingManager:
             if Path(self.data_file).exists():
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     self.recordings = json.load(f)
+
+                # Migrate old recordings to add missing fields
+                needs_save = False
+                default_prompt = """Maak een samenvatting wat hier besproken is. Geef ook de actiepunten.
+Er zijn meerdere personen aan het woord geweest maar dat is niet aangegeven in de tekst,
+probeer dat er zelf uit te halen. Geef het weer in de volgende vorm, waarbij je <blabla> vervangt door
+de juiste informatie. Zet deelnemers in alfabetische volgorde, actiepunten in volgorde van hoe ze aan bod kwamen in
+de tekst. Soms wordt er over personen gesproken maar zijn ze niet aanwezig in de meeting,
+zet ze dan ook niet bij de deelnemers.
+
+--- Deelnemers ---
+- <persoon 1> - <Mening van die persoon in 1 zin>
+- <persoon 2> - <Mening van die persoon in 1 zin>
+- etc...
+
+--- Samenvatting ---
+<korte samenvatting in 3 zinnen>
+
+--- Actiepunten ---
+- <actiepunt 1> -- <verantwoordelijke persoon>
+- <actiepunt 2> -- <verantwoordelijke persoon>
+- etc...
+
+Hier volgt de tekst:"""
+
+                for rec in self.recordings:
+                    changed = False
+
+                    # Add missing summary_prompt
+                    if 'summary_prompt' not in rec:
+                        rec['summary_prompt'] = default_prompt
+                        changed = True
+
+                    # Add missing AI provider settings
+                    if 'ai_provider' not in rec:
+                        rec['ai_provider'] = 'azure'
+                        changed = True
+
+                    if 'segment_duration' not in rec:
+                        rec['segment_duration'] = 30
+                        changed = True
+
+                    if 'overlap_duration' not in rec:
+                        rec['overlap_duration'] = 15
+                        changed = True
+
+                    if 'ollama_url' not in rec:
+                        rec['ollama_url'] = 'http://localhost:11434/v1'
+                        changed = True
+
+                    if 'ollama_model' not in rec:
+                        rec['ollama_model'] = ''
+                        changed = True
+
+                    if changed:
+                        needs_save = True
+
+                # Save if we migrated any recordings
+                if needs_save:
+                    print(f"DEBUG: Migrated {sum(1 for rec in self.recordings if 'summary_prompt' in rec)} recordings with missing fields")
+                    self.save_recordings()
+
         except Exception as e:
             print(f"Error loading recordings: {e}")
             self.recordings = []
@@ -193,8 +257,10 @@ class RecordingManager:
         except Exception as e:
             print(f"Error saving recordings: {e}")
 
-    def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model=""):
-        """Add a new recording"""
+    def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model="",
+                      ai_provider="azure", segment_duration=30, overlap_duration=15,
+                      ollama_url="", ollama_model="", summary_prompt=""):
+        """Add a new recording with all settings"""
         recording = {
             "id": timestamp,
             "audio_file": audio_file,
@@ -203,7 +269,13 @@ class RecordingManager:
             "transcription": transcription,
             "summary": summary,
             "duration": duration,  # Duration in seconds
-            "model": model  # Model used for transcription
+            "model": model,  # Whisper model used for transcription
+            "ai_provider": ai_provider,  # "azure" or "ollama"
+            "segment_duration": segment_duration,  # Segment length in seconds
+            "overlap_duration": overlap_duration,  # Overlap length in seconds
+            "ollama_url": ollama_url,  # Ollama server URL
+            "ollama_model": ollama_model,  # Ollama model name
+            "summary_prompt": summary_prompt  # Summary prompt text
         }
         self.recordings.insert(0, recording)  # Add to beginning
         self.save_recordings()
@@ -253,7 +325,7 @@ class TranscriptionApp(QMainWindow):
 
         # Model caching: store loaded models
         self.loaded_models = {}  # {model_name: model_object}
-        self.selected_model_name = "tiny"  # Default selected model
+        self.selected_model_name = "small"  # Default selected model
 
         self.is_recording = False
         self.recording_time = 0
@@ -274,6 +346,10 @@ class TranscriptionApp(QMainWindow):
         self.segments_to_transcribe = []  # Queue of segments to transcribe
         self.transcribed_segments = []  # List of transcribed texts
         self.is_transcribing_segment = False  # Flag to track if currently transcribing
+
+        # Track summary generation
+        self.is_generating_summary = False  # Flag to track if currently generating summary
+        self.pending_summary_needed = False  # Flag to indicate if a summary is needed after current one completes
 
         # Settings
         self.segment_duration = 30  # seconds
@@ -300,8 +376,15 @@ zet ze dan ook niet bij de deelnemers.
 
 Hier volgt de tekst:"""
 
+        # AI Provider settings
+        self.ai_provider = "azure"  # "azure" or "ollama"
+        self.ollama_url = "http://localhost:11434/v1"  # Default Ollama URL
+        self.ollama_model = "llama2"  # Default Ollama model
+        self.ollama_available_models = []  # Will be populated when Ollama is selected
+
         # Azure OpenAI client for summary generation
         self.azure_client = None
+        self.ollama_client = None
         self.init_azure_client()
 
         self.init_ui()
@@ -527,12 +610,12 @@ Hier volgt de tekst:"""
         self.model_button_group = QButtonGroup()
 
         self.tiny_radio = QRadioButton("Tiny (Snel, ~1GB)")
-        self.tiny_radio.setChecked(True)
         self.tiny_radio.toggled.connect(lambda: self.on_model_changed("tiny") if self.tiny_radio.isChecked() else None)
         self.model_button_group.addButton(self.tiny_radio)
         model_layout.addWidget(self.tiny_radio)
 
         self.small_radio = QRadioButton("Small (Goed, ~2GB)")
+        self.small_radio.setChecked(True)
         self.small_radio.toggled.connect(lambda: self.on_model_changed("small") if self.small_radio.isChecked() else None)
         self.model_button_group.addButton(self.small_radio)
         model_layout.addWidget(self.small_radio)
@@ -635,9 +718,20 @@ Hier volgt de tekst:"""
         self.summary_text.setFont(QFont("Arial", 13))
         summary_layout.addWidget(self.summary_text)
 
-        # Settings tab
+        # Settings tab with scroll area
         settings_widget = QWidget()
-        settings_layout = QVBoxLayout(settings_widget)
+        settings_main_layout = QVBoxLayout(settings_widget)
+        settings_main_layout.setContentsMargins(0, 0, 0, 0)
+        settings_main_layout.setSpacing(0)
+
+        # Create scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        # Create content widget for scroll area
+        settings_content = QWidget()
+        settings_layout = QVBoxLayout(settings_content)
         settings_layout.setContentsMargins(15, 15, 15, 15)
 
         settings_label = QLabel("⚙️ Instellingen")
@@ -669,7 +763,36 @@ Hier volgt de tekst:"""
         self.overlap_duration_spin.setStyleSheet("QSpinBox { padding: 8px; font-size: 13px; }")
         form_layout.addRow("Overlap fragmenten:", self.overlap_duration_spin)
 
+        # AI Provider selection
+        self.ai_provider_combo = QComboBox()
+        self.ai_provider_combo.addItems(["Azure OpenAI", "Ollama"])
+        self.ai_provider_combo.setCurrentText("Azure OpenAI" if self.ai_provider == "azure" else "Ollama")
+        self.ai_provider_combo.setStyleSheet("QComboBox { padding: 8px; font-size: 13px; }")
+        self.ai_provider_combo.currentTextChanged.connect(self.on_ai_provider_changed)
+        form_layout.addRow("AI Provider:", self.ai_provider_combo)
+
+        # Ollama URL
+        self.ollama_url_input = QLineEdit()
+        self.ollama_url_input.setText(self.ollama_url)
+        self.ollama_url_input.setPlaceholderText("http://localhost:11434/v1")
+        self.ollama_url_input.setStyleSheet("QLineEdit { padding: 8px; font-size: 13px; }")
+        form_layout.addRow("Ollama URL:", self.ollama_url_input)
+
+        # Ollama model selection
+        self.ollama_model_combo = QComboBox()
+        self.ollama_model_combo.setStyleSheet("QComboBox { padding: 8px; font-size: 13px; }")
+        self.ollama_model_combo.setEditable(True)
+        form_layout.addRow("Ollama Model:", self.ollama_model_combo)
+
+        # Refresh Ollama models button
+        refresh_ollama_btn = QPushButton("🔄 Ollama Modellen Ophalen")
+        refresh_ollama_btn.clicked.connect(self.refresh_ollama_models)
+        form_layout.addRow("", refresh_ollama_btn)
+
         settings_layout.addWidget(settings_form)
+
+        # Update visibility based on initial provider
+        self.on_ai_provider_changed(self.ai_provider_combo.currentText())
 
         # Summary prompt text area
         prompt_label = QLabel("Samenvatting Prompt:")
@@ -690,6 +813,12 @@ Hier volgt de tekst:"""
         settings_layout.addWidget(apply_btn)
 
         settings_layout.addStretch()
+
+        # Set the content widget in the scroll area
+        scroll_area.setWidget(settings_content)
+
+        # Add scroll area to main settings layout
+        settings_main_layout.addWidget(scroll_area)
 
         self.tabs.addTab(transcription_widget, "Transcriptie")
         self.tabs.addTab(summary_widget, "Samenvatting")
@@ -828,11 +957,19 @@ Hier volgt de tekst:"""
             seconds = duration % 60
             duration_str = f"{minutes}:{seconds:02d}"
 
-            # Get model name
-            model = rec.get('model', 'onbekend')
+            # Get Whisper model name
+            whisper_model = rec.get('model', 'onbekend')
 
-            # Create item text with duration and model
-            item_text = f"🎵 {rec['name']}\n📅 {rec['date']} • ⏱️ {duration_str} • 🤖 {model}"
+            # Get AI provider and model for summary
+            ai_provider = rec.get('ai_provider', 'azure')
+            if ai_provider == 'ollama':
+                ollama_model = rec.get('ollama_model', 'onbekend')
+                summary_model = f"Ollama ({ollama_model})"
+            else:
+                summary_model = "Azure OpenAI"
+
+            # Create item text with duration, Whisper model, and summary model
+            item_text = f"🎵 {rec['name']}\n📅 {rec['date']} • ⏱️ {duration_str} • 🤖 {whisper_model} • 📊 {summary_model}"
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, rec['id'])
             self.recording_list.addItem(item)
@@ -855,6 +992,10 @@ Hier volgt de tekst:"""
         self.segments_to_transcribe = []
         self.transcribed_segments = []
         self.is_transcribing_segment = False
+
+        # Reset summary generation tracking
+        self.is_generating_summary = False
+        self.pending_summary_needed = False
 
         self.record_btn.setText("■ Opname Stoppen")
         self.record_btn.setStyleSheet("""
@@ -929,13 +1070,19 @@ Hier volgt de tekst:"""
         # Get audio duration
         duration = self.recording_manager.get_audio_duration(self.current_audio_file)
 
-        # Add to manager
+        # Add to manager with all current settings
         self.recording_manager.add_recording(
             self.current_audio_file,
             self.current_recording_id,
             name=recording_name,
             duration=duration,
-            model=self.selected_model_name
+            model=self.selected_model_name,
+            ai_provider=self.ai_provider,
+            segment_duration=self.segment_duration,
+            overlap_duration=self.overlap_duration,
+            ollama_url=self.ollama_url,
+            ollama_model=self.ollama_model,
+            summary_prompt=self.summary_prompt
         )
 
         # Refresh list
@@ -1072,15 +1219,30 @@ Hier volgt de tekst:"""
         # Check if all segments are done
         if not self.segments_to_transcribe and not self.is_transcribing_segment:
             print(f"DEBUG: All segments transcribed, saving to database")
-            # All segments complete - save transcription and model to database
+            # All segments complete - save transcription, model, and all settings to database
             self.recording_manager.update_recording(
                 self.current_recording_id,
                 transcription=full_text,
-                model=self.selected_model_name
+                model=self.selected_model_name,
+                ai_provider=self.ai_provider,
+                segment_duration=self.segment_duration,
+                overlap_duration=self.overlap_duration,
+                ollama_url=self.ollama_url,
+                ollama_model=self.ollama_model,
+                summary_prompt=self.summary_prompt
             )
-            # Refresh list to show updated model
+            # Refresh list to show updated model and settings
             self.refresh_recording_list()
-            print(f"DEBUG: Model {self.selected_model_name} saved for recording {self.current_recording_id}")
+            print(f"DEBUG: Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
+
+            # Ensure a final summary is generated
+            print(f"DEBUG: All segments done, ensuring final summary is generated")
+            if self.is_generating_summary:
+                # Mark that we need a final summary after current one completes
+                self.pending_summary_needed = True
+            else:
+                # No summary in progress, generate one now
+                self.generate_summary(full_text)
 
     def retranscribe_with_segments(self):
         """Split existing recording into segments and transcribe incrementally"""
@@ -1240,12 +1402,18 @@ Hier volgt de tekst:"""
             self.status_label.setText("✅ Transcriptie voltooid")
             self.status_bar.showMessage("Transcriptie succesvol voltooid")
 
-            # Update recording with transcription
+            # Update recording with transcription, model, and all settings
             print(f"DEBUG: Updating recording in database")
             self.recording_manager.update_recording(
                 self.current_recording_id,
                 transcription=transcription_text,
-                model=self.selected_model_name
+                model=self.selected_model_name,
+                ai_provider=self.ai_provider,
+                segment_duration=self.segment_duration,
+                overlap_duration=self.overlap_duration,
+                ollama_url=self.ollama_url,
+                ollama_model=self.ollama_model,
+                summary_prompt=self.summary_prompt
             )
 
             # Refresh the recording list to show updated model
@@ -1259,45 +1427,78 @@ Hier volgt de tekst:"""
         print(f"DEBUG: on_transcription_complete finished")
 
     def generate_summary(self, text):
-        """Generate a summary of the transcription using Azure OpenAI"""
+        """Generate a summary of the transcription using Azure OpenAI or Ollama"""
         if not text or not text.strip():
             print("DEBUG: No text to summarize")
             return
 
+        # Check if already generating a summary
+        if self.is_generating_summary:
+            print("DEBUG: Summary generation already in progress, marking as pending")
+            self.pending_summary_needed = True
+            return
+
+        # Mark that we're generating a summary
+        self.is_generating_summary = True
+        self.pending_summary_needed = False
         self.status_label.setText("Samenvatting genereren met AI...")
 
         def worker():
             try:
-                print(f"DEBUG: Summary worker started")
+                print(f"DEBUG: Summary worker started with provider: {self.ai_provider}")
 
-                # Check if Azure client is available
-                if not self.azure_client:
-                    print("WARNING: Azure OpenAI client not available, skipping summary")
-                    self.summary_complete.emit("Azure OpenAI niet beschikbaar voor samenvattingen")
-                    return
-
-                # Get model name from env
-                model_name = os.getenv('AZURE_OPENAI_MODEL', 'gpt-4o')
-
-                # Create prompt for Azure OpenAI using configured prompt
+                # Create prompt using configured prompt
                 prompt = f"{self.summary_prompt}\n\n{text}"
 
-                print(f"DEBUG: Calling Azure OpenAI with model {model_name}")
+                if self.ai_provider == "ollama":
+                    # Use Ollama
+                    if not self.ollama_client:
+                        print("WARNING: Ollama client not initialized")
+                        self.summary_complete.emit("Ollama client niet geïnitialiseerd. Pas eerst de instellingen toe.")
+                        return
 
-                # Call Azure OpenAI
-                response = self.azure_client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": "Je bent een assistent die samenvattingen maakt van transcripties van vergaderingen en gesprekken in het Nederlands."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=2000
-                )
+                    print(f"DEBUG: Calling Ollama with model {self.ollama_model}")
 
-                # Extract summary from response
-                summary = response.choices[0].message.content.strip()
-                print(f"DEBUG: Summary generated by Azure OpenAI (length={len(summary)})")
+                    # Call Ollama via OpenAI-compatible API
+                    response = self.ollama_client.chat.completions.create(
+                        model=self.ollama_model,
+                        messages=[
+                            {"role": "system", "content": "Je bent een assistent die samenvattingen maakt van transcripties van vergaderingen en gesprekken in het Nederlands."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.7,
+                    )
+
+                    # Extract summary from response
+                    summary = response.choices[0].message.content.strip()
+                    print(f"DEBUG: Summary generated by Ollama (length={len(summary)})")
+
+                else:
+                    # Use Azure OpenAI
+                    if not self.azure_client:
+                        print("WARNING: Azure OpenAI client not available, skipping summary")
+                        self.summary_complete.emit("Azure OpenAI niet beschikbaar voor samenvattingen")
+                        return
+
+                    # Get model name from env
+                    model_name = os.getenv('AZURE_OPENAI_MODEL', 'gpt-4o')
+
+                    print(f"DEBUG: Calling Azure OpenAI with model {model_name}")
+
+                    # Call Azure OpenAI
+                    response = self.azure_client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": "Je bent een assistent die samenvattingen maakt van transcripties van vergaderingen en gesprekken in het Nederlands."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=2000
+                    )
+
+                    # Extract summary from response
+                    summary = response.choices[0].message.content.strip()
+                    print(f"DEBUG: Summary generated by Azure OpenAI (length={len(summary)})")
 
                 # Emit signal to update UI
                 self.summary_complete.emit(summary)
@@ -1316,8 +1517,9 @@ Hier volgt de tekst:"""
         print(f"DEBUG: on_summary_complete called")
         self.summary_text.clear()
         self.summary_text.setPlainText(summary)
-        self.status_label.setText("✅ Klaar - Transcriptie en samenvatting voltooid")
-        self.status_bar.showMessage("Volledig verwerkt en klaar")
+
+        # Mark summary as no longer generating
+        self.is_generating_summary = False
 
         # Update recording with summary
         self.recording_manager.update_recording(
@@ -1325,6 +1527,25 @@ Hier volgt de tekst:"""
             summary=summary
         )
         print(f"DEBUG: Summary completed and saved")
+
+        # Check if another summary is needed (e.g., new transcription came in while we were generating)
+        if self.pending_summary_needed:
+            print(f"DEBUG: Pending summary needed, generating final summary")
+            self.pending_summary_needed = False
+            # Get current transcription text
+            full_text = " ".join(self.transcribed_segments)
+            if full_text.strip():
+                self.generate_summary(full_text)
+        else:
+            # Only show "completed" status if all segments are done
+            if not self.segments_to_transcribe and not self.is_transcribing_segment:
+                self.status_label.setText("✅ Klaar - Transcriptie en samenvatting voltooid")
+                self.status_bar.showMessage("Volledig verwerkt en klaar")
+                print(f"DEBUG: All processing complete!")
+            else:
+                print(f"DEBUG: Summary complete but still processing segments (queue: {len(self.segments_to_transcribe)}, transcribing: {self.is_transcribing_segment})")
+                self.status_label.setText("Bezig met transcriptie...")
+                self.status_bar.showMessage("Segmenten worden nog getranscribeerd...")
 
     def update_button_states(self):
         """Update button states based on selection"""
@@ -1362,8 +1583,56 @@ Hier volgt de tekst:"""
             self.current_audio_file = recording['audio_file']
             self.transcription_text.setPlainText(recording.get('transcription', ''))
             self.summary_text.setPlainText(recording.get('summary', ''))
+
+            # Load all settings from the recording
+            # Whisper model
+            saved_model = recording.get('model', 'small')
+            self.selected_model_name = saved_model
+
+            # Update radio button selection
+            if saved_model == 'tiny':
+                self.tiny_radio.setChecked(True)
+            elif saved_model == 'small':
+                self.small_radio.setChecked(True)
+            elif saved_model == 'medium':
+                self.medium_radio.setChecked(True)
+            elif saved_model == 'large':
+                self.large_radio.setChecked(True)
+
+            # Load segment settings
+            self.segment_duration = recording.get('segment_duration', 30)
+            self.overlap_duration = recording.get('overlap_duration', 15)
+            self.segment_duration_spin.setValue(self.segment_duration)
+            self.overlap_duration_spin.setValue(self.overlap_duration)
+
+            # Load AI provider settings
+            self.ai_provider = recording.get('ai_provider', 'azure')
+            self.ollama_url = recording.get('ollama_url', 'http://localhost:11434/v1')
+            self.ollama_model = recording.get('ollama_model', '')
+            self.summary_prompt = recording.get('summary_prompt', self.summary_prompt)
+
+            # Update UI with loaded settings
+            self.ai_provider_combo.setCurrentText("Azure OpenAI" if self.ai_provider == "azure" else "Ollama")
+            self.ollama_url_input.setText(self.ollama_url)
+            self.ollama_model_combo.setCurrentText(self.ollama_model)
+            self.summary_prompt_text.setPlainText(self.summary_prompt)
+
+            # Update recorder settings
+            self.recorder.segment_duration = self.segment_duration
+            self.recorder.overlap_duration = self.overlap_duration
+
+            # Initialize Ollama client if needed
+            if self.ai_provider == "ollama" and self.ollama_url:
+                try:
+                    self.ollama_client = OpenAI(
+                        base_url=self.ollama_url,
+                        api_key="ollama"
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not initialize Ollama client: {e}")
+
             self.status_label.setText(f"Geladen: {recording['name']}")
-            self.status_bar.showMessage(f"Opname geladen: {recording['date']}")
+            self.status_bar.showMessage(f"Opname en instellingen geladen: {recording['date']}")
 
     def play_recording(self):
         """Play the selected recording using system audio player"""
@@ -1545,12 +1814,97 @@ Hier volgt de tekst:"""
             else:
                 self.status_bar.showMessage(f"{deleted_count} opnames verwijderd")
 
+    def on_ai_provider_changed(self, provider_text):
+        """Handle AI provider selection change"""
+        is_ollama = provider_text == "Ollama"
+
+        # Show/hide Ollama-specific fields
+        self.ollama_url_input.setEnabled(is_ollama)
+        self.ollama_model_combo.setEnabled(is_ollama)
+
+        # Refresh Ollama models if switching to Ollama
+        if is_ollama and not self.ollama_available_models:
+            self.refresh_ollama_models()
+
+    def refresh_ollama_models(self):
+        """Fetch available models from Ollama"""
+        ollama_url = self.ollama_url_input.text().strip()
+
+        # Remove /v1 suffix if present for the tags endpoint
+        base_url = ollama_url.replace("/v1", "").rstrip("/")
+
+        try:
+            self.status_bar.showMessage("Ollama modellen ophalen...")
+            response = requests.get(f"{base_url}/api/tags", timeout=5)
+
+            if response.status_code == 200:
+                data = response.json()
+                models = [model["name"] for model in data.get("models", [])]
+
+                if models:
+                    self.ollama_available_models = models
+                    self.ollama_model_combo.clear()
+                    self.ollama_model_combo.addItems(models)
+
+                    # Set current model if it exists in the list
+                    if self.ollama_model in models:
+                        self.ollama_model_combo.setCurrentText(self.ollama_model)
+
+                    self.status_bar.showMessage(f"{len(models)} Ollama modellen gevonden")
+                    QMessageBox.information(
+                        self,
+                        "Ollama Modellen",
+                        f"Gevonden {len(models)} modellen:\n\n" + "\n".join(f"• {m}" for m in models[:10]) +
+                        (f"\n... en {len(models) - 10} meer" if len(models) > 10 else "")
+                    )
+                else:
+                    self.status_bar.showMessage("Geen Ollama modellen gevonden")
+                    QMessageBox.warning(
+                        self,
+                        "Geen Modellen",
+                        "Geen modellen gevonden op deze Ollama server.\n\n"
+                        "Zorg ervoor dat Ollama draait en dat er modellen geïnstalleerd zijn."
+                    )
+            else:
+                self.status_bar.showMessage(f"Ollama error: {response.status_code}")
+                QMessageBox.warning(
+                    self,
+                    "Ollama Fout",
+                    f"Kon geen verbinding maken met Ollama.\n\n"
+                    f"Status code: {response.status_code}\n"
+                    f"URL: {base_url}/api/tags"
+                )
+        except requests.exceptions.ConnectionError:
+            self.status_bar.showMessage("Kan geen verbinding maken met Ollama")
+            QMessageBox.warning(
+                self,
+                "Verbinding Mislukt",
+                f"Kan geen verbinding maken met Ollama op:\n{base_url}\n\n"
+                f"Zorg ervoor dat:\n"
+                f"• Ollama geïnstalleerd en gestart is\n"
+                f"• De URL correct is\n"
+                f"• Ollama draait op de opgegeven URL"
+            )
+        except Exception as e:
+            self.status_bar.showMessage(f"Fout bij ophalen modellen: {str(e)}")
+            QMessageBox.warning(
+                self,
+                "Fout",
+                f"Fout bij ophalen van Ollama modellen:\n\n{str(e)}"
+            )
+
     def apply_settings(self):
         """Apply settings from the Settings tab"""
         # Get values from UI
         segment_duration = self.segment_duration_spin.value()
         overlap_duration = self.overlap_duration_spin.value()
         summary_prompt = self.summary_prompt_text.toPlainText()
+
+        # Get AI provider settings
+        ai_provider_text = self.ai_provider_combo.currentText()
+        ai_provider = "azure" if ai_provider_text == "Azure OpenAI" else "ollama"
+        ollama_url = self.ollama_url_input.text().strip()
+        ollama_model = self.ollama_model_combo.currentText().strip()
 
         # Validate: overlap must be less than segment duration
         if overlap_duration >= segment_duration:
@@ -1562,28 +1916,89 @@ Hier volgt de tekst:"""
             )
             return
 
+        # Validate Ollama settings if Ollama is selected
+        if ai_provider == "ollama":
+            if not ollama_url:
+                QMessageBox.warning(
+                    self,
+                    "Ongeldige Instellingen",
+                    "Ollama URL mag niet leeg zijn."
+                )
+                return
+            if not ollama_model:
+                QMessageBox.warning(
+                    self,
+                    "Ongeldige Instellingen",
+                    "Selecteer een Ollama model of voer een model naam in."
+                )
+                return
+
         # Apply settings
         self.segment_duration = segment_duration
         self.overlap_duration = overlap_duration
         self.summary_prompt = summary_prompt
+        self.ai_provider = ai_provider
+        self.ollama_url = ollama_url
+        self.ollama_model = ollama_model
+
+        # Initialize Ollama client if needed
+        if ai_provider == "ollama":
+            try:
+                self.ollama_client = OpenAI(
+                    base_url=ollama_url,
+                    api_key="ollama"  # Ollama doesn't need a real API key
+                )
+                print(f"DEBUG: Ollama client initialized with URL: {ollama_url}")
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Ollama Initialisatie Fout",
+                    f"Kon Ollama client niet initialiseren:\n\n{str(e)}"
+                )
+                return
 
         # Update AudioRecorder settings
         self.recorder.segment_duration = segment_duration
         self.recorder.overlap_duration = overlap_duration
 
+        # Save settings to currently selected recording if one is loaded
+        if self.current_recording_id:
+            self.recording_manager.update_recording(
+                self.current_recording_id,
+                ai_provider=ai_provider,
+                segment_duration=segment_duration,
+                overlap_duration=overlap_duration,
+                ollama_url=ollama_url,
+                ollama_model=ollama_model,
+                summary_prompt=summary_prompt
+            )
+            # Refresh list to show updated settings
+            self.refresh_recording_list()
+            print(f"DEBUG: Settings saved to recording {self.current_recording_id}")
+
         # Show confirmation
-        self.status_bar.showMessage(
-            f"Instellingen toegepast: {segment_duration}s fragmenten, {overlap_duration}s overlap"
-        )
+        provider_name = "Azure OpenAI" if ai_provider == "azure" else f"Ollama ({ollama_model})"
+        status_msg = f"Instellingen toegepast: {segment_duration}s fragmenten, {overlap_duration}s overlap, {provider_name}"
+        if self.current_recording_id:
+            status_msg += " (opgeslagen bij huidige opname)"
+        self.status_bar.showMessage(status_msg)
+
+        confirmation_msg = f"De volgende instellingen zijn opgeslagen:\n\n" \
+                          f"• Fragmentlengte: {segment_duration} seconden\n" \
+                          f"• Overlap: {overlap_duration} seconden\n" \
+                          f"• AI Provider: {provider_name}\n" \
+                          f"• Samenvatting prompt aangepast\n\n" \
+                          f"Deze worden gebruikt voor alle nieuwe opnames en hertranscripties."
+
+        if self.current_recording_id:
+            recording = self.recording_manager.get_recording(self.current_recording_id)
+            if recording:
+                confirmation_msg += f"\n\nDe instellingen zijn ook opgeslagen bij de geselecteerde opname:\n'{recording['name']}'"
 
         QMessageBox.information(
             self,
             "Instellingen Toegepast",
-            f"De volgende instellingen zijn opgeslagen:\n\n"
-            f"• Fragmentlengte: {segment_duration} seconden\n"
-            f"• Overlap: {overlap_duration} seconden\n"
-            f"• Samenvatting prompt aangepast\n\n"
-            f"Deze worden gebruikt voor alle nieuwe opnames en hertranscripties."
+            confirmation_msg
         )
 
     def closeEvent(self, event):
