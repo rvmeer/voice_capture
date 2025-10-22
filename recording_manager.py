@@ -5,8 +5,56 @@ Manages recording metadata and storage with subfolder structure
 
 import json
 import wave
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+
+def seconds_to_iso_duration(seconds):
+    """Convert seconds to ISO 8601 duration format (e.g., PT1M30S)"""
+    if seconds == 0:
+        return "PT0S"
+
+    td = timedelta(seconds=int(seconds))
+    hours = td.seconds // 3600
+    minutes = (td.seconds % 3600) // 60
+    secs = td.seconds % 60
+
+    parts = []
+    if td.days > 0:
+        parts.append(f"{td.days}D")
+
+    time_parts = []
+    if hours > 0:
+        time_parts.append(f"{hours}H")
+    if minutes > 0:
+        time_parts.append(f"{minutes}M")
+    if secs > 0 or len(time_parts) == 0:
+        time_parts.append(f"{secs}S")
+
+    if time_parts:
+        parts.append("T" + "".join(time_parts))
+
+    return "P" + "".join(parts) if parts else "PT0S"
+
+
+def iso_duration_to_seconds(iso_duration):
+    """Convert ISO 8601 duration format to seconds"""
+    if not iso_duration or iso_duration == "PT0S":
+        return 0
+
+    # Simple parser for PT format (hours, minutes, seconds)
+    import re
+    pattern = r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?'
+    match = re.match(pattern, iso_duration)
+
+    if not match:
+        return 0
+
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+
+    return hours * 3600 + minutes * 60 + seconds
 
 
 class RecordingManager:
@@ -75,7 +123,7 @@ class RecordingManager:
             "date": datetime.strptime(timestamp, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S"),
             "transcription": transcription,
             "summary": summary,
-            "duration": duration,  # Duration in seconds
+            "duration": seconds_to_iso_duration(duration),  # Duration in ISO 8601 format
             "model": model,  # Whisper model used for transcription
             "segment_duration": segment_duration,  # Segment length in seconds
             "overlap_duration": overlap_duration,  # Overlap length in seconds
@@ -100,6 +148,9 @@ class RecordingManager:
         """Update recording data"""
         for rec in self.recordings:
             if rec["id"] == recording_id:
+                # Convert duration to ISO format if it's provided as seconds
+                if 'duration' in kwargs and isinstance(kwargs['duration'], (int, float)):
+                    kwargs['duration'] = seconds_to_iso_duration(kwargs['duration'])
                 rec.update(kwargs)
                 self.save_recording(rec)
                 break

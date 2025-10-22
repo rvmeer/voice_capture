@@ -23,7 +23,7 @@ load_dotenv()
 
 # Import custom modules
 from audio_recorder import AudioRecorder
-from recording_manager import RecordingManager
+from recording_manager import RecordingManager, iso_duration_to_seconds, seconds_to_iso_duration
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -107,9 +107,14 @@ class TranscriptionApp(QMainWindow):
         self.segment_duration = 10  # seconds
         self.overlap_duration = 5  # seconds
 
-        self.init_ui()
+        # Timer for recording duration (needed even in tray-only mode)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+
+        # Don't initialize UI - tray only mode
+        # self.init_ui()
         self.init_tray_icon()
-        self.refresh_recording_list()
+        # self.refresh_recording_list()
 
         # Load default model (tiny) on startup
         QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
@@ -193,10 +198,10 @@ class TranscriptionApp(QMainWindow):
 
         tray_menu.addSeparator()
 
-        # Add show window action
-        show_action = tray_menu.addAction("Toon Venster")
-        if show_action is not None:
-            show_action.triggered.connect(self.show)
+        # Don't add show window action in tray-only mode
+        # show_action = tray_menu.addAction("Toon Venster")
+        # if show_action is not None:
+        #     show_action.triggered.connect(self.show)
 
         # Add quit action
         quit_action = tray_menu.addAction("Afsluiten")
@@ -283,8 +288,8 @@ class TranscriptionApp(QMainWindow):
                     duration=duration
                 )
 
-                # Refresh list
-                self.refresh_recording_list()
+                # Refresh list (disabled in tray-only mode)
+                # self.refresh_recording_list()
 
                 # Show notification
                 self.tray_icon.showMessage(
@@ -718,12 +723,16 @@ class TranscriptionApp(QMainWindow):
 
         # Check if already loaded
         if model_name in self.loaded_models:
-            self.status_bar.showMessage(f"{model_name.capitalize()} model geselecteerd (reeds geladen)")
-            self.status_label.setText(f"✅ {model_name.capitalize()} model klaar")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"{model_name.capitalize()} model geselecteerd (reeds geladen)")
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"✅ {model_name.capitalize()} model klaar")
         else:
             # Load model immediately
-            self.status_bar.showMessage(f"{model_name.capitalize()} model wordt geladen...")
-            self.status_label.setText(f"Model {model_name} laden...")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"{model_name.capitalize()} model wordt geladen...")
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"Model {model_name} laden...")
             self.load_model_async(model_name)
 
     def load_model_async(self, model_name):
@@ -735,15 +744,19 @@ class TranscriptionApp(QMainWindow):
             "large": "~10GB, best"
         }
 
-        self.status_label.setText(f"Whisper {model_name} model laden...")
-        self.status_bar.showMessage(f"Whisper {model_name} model aan het laden ({model_sizes.get(model_name, '')})...")
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(f"Whisper {model_name} model laden...")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage(f"Whisper {model_name} model aan het laden ({model_sizes.get(model_name, '')})...")
 
         # Disable UI during loading
-        self.record_btn.setEnabled(False)
-        self.tiny_radio.setEnabled(False)
-        self.small_radio.setEnabled(False)
-        self.medium_radio.setEnabled(False)
-        self.large_radio.setEnabled(False)
+        if hasattr(self, 'record_btn'):
+            self.record_btn.setEnabled(False)
+        if hasattr(self, 'tiny_radio'):
+            self.tiny_radio.setEnabled(False)
+            self.small_radio.setEnabled(False)
+            self.medium_radio.setEnabled(False)
+            self.large_radio.setEnabled(False)
 
         def load_model():
             try:
@@ -787,14 +800,19 @@ class TranscriptionApp(QMainWindow):
         print(f"DEBUG: on_model_loaded called for {model_name}, model: {model is not None}")
 
         if model:
-            self.status_label.setText(f"✅ {model_name.capitalize()} model geladen")
-            self.status_bar.showMessage(f"Whisper {model_name} model succesvol geladen en gecached")
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"✅ {model_name.capitalize()} model geladen")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"Whisper {model_name} model succesvol geladen en gecached")
         else:
-            self.status_label.setText(f"❌ {model_name.capitalize()} model laden mislukt")
-            self.status_bar.showMessage(f"Fout bij laden van {model_name} model")
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"❌ {model_name.capitalize()} model laden mislukt")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"Fout bij laden van {model_name} model")
 
         # Re-enable UI
-        self.enable_ui_after_model_load()
+        if hasattr(self, 'tiny_radio'):
+            self.enable_ui_after_model_load()
 
         # If there was a pending transcription, start it now
         if model and self.pending_transcription:
@@ -817,10 +835,17 @@ class TranscriptionApp(QMainWindow):
         """Refresh the recording list"""
         self.recording_list.clear()
         for rec in self.recording_manager.recordings:
-            # Format duration
-            duration = rec.get('duration', 0)
-            minutes = duration // 60
-            seconds = duration % 60
+            # Format duration - handle both ISO format and legacy seconds format
+            duration_value = rec.get('duration', 'PT0S')
+            if isinstance(duration_value, str):
+                # ISO duration format
+                duration_seconds = iso_duration_to_seconds(duration_value)
+            else:
+                # Legacy format (seconds)
+                duration_seconds = duration_value
+
+            minutes = duration_seconds // 60
+            seconds = duration_seconds % 60
             duration_str = f"{minutes}:{seconds:02d}"
 
             # Get Whisper model name
@@ -843,7 +868,8 @@ class TranscriptionApp(QMainWindow):
         """Start audio recording"""
         self.is_recording = True
         self.recording_time = 0
-        self.transcription_text.clear()
+        if hasattr(self, 'transcription_text'):
+            self.transcription_text.clear()
         
         # Reset segment tracking
         self.segments_to_transcribe = []
@@ -854,18 +880,21 @@ class TranscriptionApp(QMainWindow):
         self.is_generating_summary = False
         self.pending_summary_needed = False
 
-        self.record_btn.setText("■ Opname Stoppen")
-        self.record_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-        """)
-        self.status_label.setText("🔴 Opname bezig...")
-        self.status_bar.showMessage("Opname gestart")
+        if hasattr(self, 'record_btn'):
+            self.record_btn.setText("■ Opname Stoppen")
+            self.record_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #f44336;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: #da190b;
+                }
+            """)
+        if hasattr(self, 'status_label'):
+            self.status_label.setText("🔴 Opname bezig...")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("Opname gestart")
 
         # Start recording with segment callback
         self.recorder.start_recording(segment_callback=self.on_segment_ready)
@@ -887,8 +916,8 @@ class TranscriptionApp(QMainWindow):
             overlap_duration=self.overlap_duration
         )
 
-        # Refresh list to show the new recording
-        self.refresh_recording_list()
+        # Refresh list to show the new recording (disabled in tray-only mode)
+        # self.refresh_recording_list()
 
         print(f"DEBUG: Created initial JSON for recording {self.current_recording_id}")
 
@@ -897,22 +926,26 @@ class TranscriptionApp(QMainWindow):
         self.is_recording = False
         self.timer.stop()
 
-        self.record_btn.setEnabled(False)
-        self.record_btn.setText("● Opname Starten")
-        self.record_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        self.status_label.setText("Opname opslaan...")
-        self.status_bar.showMessage("Opname gestopt, aan het opslaan...")
+        if hasattr(self, 'record_btn'):
+            self.record_btn.setEnabled(False)
+            self.record_btn.setText("● Opname Starten")
+            self.record_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #4CAF50;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: #45a049;
+                }
+            """)
+        if hasattr(self, 'status_label'):
+            self.status_label.setText("Opname opslaan...")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("Opname gestopt, aan het opslaan...")
 
         # Force process events to handle UI updates
-        QApplication.processEvents()
+        if hasattr(self, 'transcription_text'):
+            QApplication.processEvents()
 
         # Save recording in a thread-safe way
         def save_and_continue():
@@ -924,26 +957,32 @@ class TranscriptionApp(QMainWindow):
                 print(f"Error in save_and_continue: {e}")
                 import traceback
                 traceback.print_exc()
-                self.record_btn.setEnabled(True)
+                if hasattr(self, 'record_btn'):
+                    self.record_btn.setEnabled(True)
 
         # Delay the save operation to let audio thread cleanup
         QTimer.singleShot(100, save_and_continue)
 
     def ask_recording_name(self):
         """Ask for recording name (called after stop_recording completes)"""
-        # Ask for name
-        default_name = f"Opname {datetime.now().strftime('%H:%M')}"
-        name, ok = QInputDialog.getText(
-            self,
-            "Opname Naam",
-            "Geef deze opname een naam:",
-            text=default_name
-        )
-
-        if ok and name:
-            recording_name = name
+        # In tray-only mode, automatically generate a name
+        if not hasattr(self, 'transcription_text'):
+            # Tray-only mode - auto-generate name
+            recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         else:
-            recording_name = f"Opname {self.current_recording_id}"
+            # Ask for name (UI mode)
+            default_name = f"Opname {datetime.now().strftime('%H:%M')}"
+            name, ok = QInputDialog.getText(
+                self,
+                "Opname Naam",
+                "Geef deze opname een naam:",
+                text=default_name
+            )
+
+            if ok and name:
+                recording_name = name
+            else:
+                recording_name = f"Opname {self.current_recording_id}"
 
         # Get audio duration
         duration = self.recording_manager.get_audio_duration(self.current_audio_file)
@@ -955,8 +994,8 @@ class TranscriptionApp(QMainWindow):
             duration=duration
         )
 
-        # Refresh list
-        self.refresh_recording_list()
+        # Refresh list (disabled in tray-only mode)
+        # self.refresh_recording_list()
 
         # Start transcription in background
         self.transcribe_audio()
@@ -966,7 +1005,8 @@ class TranscriptionApp(QMainWindow):
         self.recording_time += 1
         minutes = self.recording_time // 60
         seconds = self.recording_time % 60
-        self.timer_label.setText(f"{minutes:02d}:{seconds:02d}")
+        if hasattr(self, 'timer_label'):
+            self.timer_label.setText(f"{minutes:02d}:{seconds:02d}")
 
     def on_segment_ready(self, segment_file, segment_num):
         """Called when a new 30-second segment is ready"""
@@ -1074,7 +1114,8 @@ class TranscriptionApp(QMainWindow):
 
         # Update UI with concatenated text
         full_text = " ".join(self.transcribed_segments)
-        self.transcription_text.setPlainText(full_text)
+        if hasattr(self, 'transcription_text'):
+            self.transcription_text.setPlainText(full_text)
 
         # Write incremental transcription to file (both TXT and update JSON)
         if self.current_recording_id and full_text.strip():
@@ -1088,13 +1129,27 @@ class TranscriptionApp(QMainWindow):
 
                 print(f"DEBUG: Updated transcription file: {transcription_file}")
 
-                # Update JSON file with current transcription
+                # Calculate duration based on number of segments
+                # Formula: first_segment_duration + (remaining_segments * (segment_duration - overlap))
+                num_segments = len(self.transcribed_segments)
+                if num_segments > 0:
+                    if num_segments == 1:
+                        # First segment: full segment duration
+                        calculated_duration = self.segment_duration
+                    else:
+                        # First segment + additional segments (each adds segment_duration - overlap)
+                        calculated_duration = self.segment_duration + ((num_segments - 1) * (self.segment_duration - self.overlap_duration))
+                else:
+                    calculated_duration = 0
+
+                # Update JSON file with current transcription and calculated duration
                 self.recording_manager.update_recording(
                     self.current_recording_id,
-                    transcription=full_text
+                    transcription=full_text,
+                    duration=calculated_duration
                 )
 
-                print(f"DEBUG: Updated JSON with incremental transcription")
+                print(f"DEBUG: Updated JSON with incremental transcription and duration: {seconds_to_iso_duration(calculated_duration)} ({num_segments} segments)")
             except Exception as e:
                 print(f"ERROR: Failed to write transcription file: {e}")
 
@@ -1115,8 +1170,8 @@ class TranscriptionApp(QMainWindow):
                 segment_duration=self.segment_duration,
                 overlap_duration=self.overlap_duration
             )
-            # Refresh list to show updated model and settings
-            self.refresh_recording_list()
+            # Refresh list to show updated model and settings (disabled in tray-only mode)
+            # self.refresh_recording_list()
             print(f"DEBUG: Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
 
 
@@ -1214,8 +1269,9 @@ class TranscriptionApp(QMainWindow):
         """Start transcription with loaded model"""
         print(f"DEBUG: start_transcription_with_model called")
 
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)  # Indeterminate progress
 
         model_times = {
             "tiny": "5-10 seconden",
@@ -1226,11 +1282,14 @@ class TranscriptionApp(QMainWindow):
 
         time_estimate = model_times.get(self.selected_model_name, "enkele seconden")
 
-        self.status_label.setText(f"Transcriptie bezig (~{time_estimate})...")
-        self.status_bar.showMessage(f"Audio wordt getranscribeerd...")
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(f"Transcriptie bezig (~{time_estimate})...")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage(f"Audio wordt getranscribeerd...")
 
         # Force UI update
-        QApplication.processEvents()
+        if hasattr(self, 'transcription_text'):
+            QApplication.processEvents()
 
         def worker():
             try:
@@ -1265,12 +1324,15 @@ class TranscriptionApp(QMainWindow):
     def on_transcription_complete(self, result):
         """Handle transcription completion in main thread (slot)"""
         print(f"DEBUG: on_transcription_complete called with result type: {type(result)}")
-        self.progress_bar.setVisible(False)
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.setVisible(False)
 
         if "error" in result:
             print(f"DEBUG: Error in result: {result['error']}")
-            self.status_label.setText(f"Fout: {result['error']}")
-            self.status_bar.showMessage(f"Transcriptie fout: {result['error']}")
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"Fout: {result['error']}")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"Transcriptie fout: {result['error']}")
         else:
             # Get transcription text
             transcription_text = result.get("text", "")
@@ -1278,12 +1340,15 @@ class TranscriptionApp(QMainWindow):
             print(f"DEBUG: Setting transcription text (length={len(transcription_text)}): {transcription_text[:100]}...")
 
             # Update UI
-            self.transcription_text.clear()
-            self.transcription_text.setPlainText(transcription_text)
+            if hasattr(self, 'transcription_text'):
+                self.transcription_text.clear()
+                self.transcription_text.setPlainText(transcription_text)
 
             print(f"DEBUG: Text set in UI, updating labels")
-            self.status_label.setText("✅ Transcriptie voltooid")
-            self.status_bar.showMessage("Transcriptie succesvol voltooid")
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("✅ Transcriptie voltooid")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage("Transcriptie succesvol voltooid")
 
             # Update recording with transcription, model, and all settings
             print(f"DEBUG: Updating recording in database")
@@ -1295,12 +1360,13 @@ class TranscriptionApp(QMainWindow):
                 overlap_duration=self.overlap_duration
             )
 
-            # Refresh the recording list to show updated model
-            self.refresh_recording_list()
+            # Refresh the recording list to show updated model (disabled in tray-only mode)
+            # self.refresh_recording_list()
 
-            
 
-        self.record_btn.setEnabled(True)
+
+        if hasattr(self, 'record_btn'):
+            self.record_btn.setEnabled(True)
         print(f"DEBUG: on_transcription_complete finished")
 
    
@@ -1562,31 +1628,35 @@ class TranscriptionApp(QMainWindow):
     def refresh_audio_devices(self):
         """Refresh the list of available audio input devices"""
         try:
-            self.status_bar.showMessage("Audio apparaten ophalen...")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage("Audio apparaten ophalen...")
 
             # Get devices from the recorder
             devices = self.recorder.get_audio_devices()
 
-            # Clear and populate the combo box
-            self.audio_device_combo.clear()
+            # Clear and populate the combo box (only if UI exists)
+            if hasattr(self, 'audio_device_combo'):
+                self.audio_device_combo.clear()
 
-            # Add default device option
-            self.audio_device_combo.addItem("Standaard (Systeem Default)", None)
+                # Add default device option
+                self.audio_device_combo.addItem("Standaard (Systeem Default)", None)
 
-            # Add all available input devices
-            for device in devices:
-                device_name = device['name']
-                device_index = device['index']
-                self.audio_device_combo.addItem(device_name, device_index)
+                # Add all available input devices
+                for device in devices:
+                    device_name = device['name']
+                    device_index = device['index']
+                    self.audio_device_combo.addItem(device_name, device_index)
 
-            self.status_bar.showMessage(f"{len(devices)} audio apparaten gevonden")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"{len(devices)} audio apparaten gevonden")
             print(f"DEBUG: Found {len(devices)} audio input devices")
 
             # Also refresh tray menu
             self.refresh_tray_input_devices()
 
         except Exception as e:
-            self.status_bar.showMessage(f"Fout bij ophalen audio apparaten: {str(e)}")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"Fout bij ophalen audio apparaten: {str(e)}")
             print(f"ERROR: Failed to refresh audio devices: {e}")
             import traceback
             traceback.print_exc()
@@ -1654,11 +1724,12 @@ class TranscriptionApp(QMainWindow):
             # Set the device on the recorder
             self.recorder.set_input_device(device_index)
 
-            # Update the combo box in settings to match
-            for i in range(self.audio_device_combo.count()):
-                if self.audio_device_combo.itemData(i) == device_index:
-                    self.audio_device_combo.setCurrentIndex(i)
-                    break
+            # Update the combo box in settings to match (only if UI exists)
+            if hasattr(self, 'audio_device_combo'):
+                for i in range(self.audio_device_combo.count()):
+                    if self.audio_device_combo.itemData(i) == device_index:
+                        self.audio_device_combo.setCurrentIndex(i)
+                        break
 
             # Show notification
             device_name = "Standaard (Systeem Default)" if device_index is None else f"Device {device_index}"
@@ -1692,15 +1763,16 @@ class TranscriptionApp(QMainWindow):
             # Update the selected model
             self.selected_model_name = model_name
 
-            # Update radio buttons in main window to match
-            if model_name == "tiny":
-                self.tiny_radio.setChecked(True)
-            elif model_name == "small":
-                self.small_radio.setChecked(True)
-            elif model_name == "medium":
-                self.medium_radio.setChecked(True)
-            elif model_name == "large":
-                self.large_radio.setChecked(True)
+            # Update radio buttons in main window to match (only if UI exists)
+            if hasattr(self, 'tiny_radio'):
+                if model_name == "tiny":
+                    self.tiny_radio.setChecked(True)
+                elif model_name == "small":
+                    self.small_radio.setChecked(True)
+                elif model_name == "medium":
+                    self.medium_radio.setChecked(True)
+                elif model_name == "large":
+                    self.large_radio.setChecked(True)
 
             # Update tray menu checkmarks
             if self.tray_tiny_action is not None:
@@ -1805,22 +1877,10 @@ class TranscriptionApp(QMainWindow):
         )
 
     def closeEvent(self, event):
-        """Handle window close - minimize to tray instead of quitting"""
-        # If tray icon exists, minimize to tray instead of closing
-        if hasattr(self, 'tray_icon') and self.tray_icon.isVisible():
-            self.hide()
-            event.ignore()
-            # Show notification
-            self.tray_icon.showMessage(
-                "Applicatie Verborgen",
-                "De applicatie draait nog in de achtergrond. Klik op het icoon om het venster te tonen.",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000
-            )
-        else:
-            # Actually closing - clean up
-            self.cleanup_and_quit()
-            event.accept()
+        """Handle window close - in tray-only mode, always clean up and quit"""
+        # In tray-only mode, if close is called, clean up and quit
+        self.cleanup_and_quit()
+        event.accept()
 
     def quit_application(self):
         """Quit the application properly"""
@@ -1868,7 +1928,8 @@ def main():
     app.setQuitOnLastWindowClosed(False)
 
     window = TranscriptionApp()
-    window.show()
+    # Don't show window in tray-only mode
+    # window.show()
 
     # Run the application
     exit_code = app.exec()
