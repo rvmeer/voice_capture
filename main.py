@@ -203,9 +203,11 @@ class TranscriptionApp(QMainWindow):
         if quit_action is not None:
             quit_action.triggered.connect(self.quit_application)
 
-        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_menu = tray_menu
+        # Don't set context menu automatically - we'll handle it manually
+        # self.tray_icon.setContextMenu(tray_menu)
 
-        # Handle tray icon click (left-click toggles recording)
+        # Handle tray icon click
         self.tray_icon.activated.connect(self.on_tray_icon_activated)
 
         # Show the tray icon
@@ -219,6 +221,14 @@ class TranscriptionApp(QMainWindow):
         """Handle tray icon activation (click)"""
         if reason == QSystemTrayIcon.ActivationReason.Trigger:  # Left click
             self.tray_toggle_recording()
+        elif reason == QSystemTrayIcon.ActivationReason.Context:  # Right click / Control+click on macOS
+            # Show context menu at cursor position
+            from PyQt6.QtGui import QCursor
+            self.tray_menu.popup(QCursor.pos())
+        elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:  # Middle click
+            # Also show menu on middle click
+            from PyQt6.QtGui import QCursor
+            self.tray_menu.popup(QCursor.pos())
 
     def tray_toggle_recording(self):
         """Toggle recording from tray icon"""
