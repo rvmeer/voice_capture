@@ -162,6 +162,46 @@ Hier volgt de tekst:"""
 
         tray_menu.addSeparator()
 
+        # Add transcription model selection submenu
+        self.model_menu = QMenu("Transcription Model", tray_menu)
+        self.model_action_group = QActionGroup(self.model_menu)
+        self.model_action_group.setExclusive(True)
+
+        # Add model options
+        self.tray_tiny_action = self.model_menu.addAction("Tiny (Snel, ~1GB)")
+        self.tray_tiny_action.setCheckable(True)
+        self.tray_tiny_action.triggered.connect(lambda: self.set_tray_model("tiny"))
+        self.model_action_group.addAction(self.tray_tiny_action)
+
+        self.tray_small_action = self.model_menu.addAction("Small (Goed, ~2GB)")
+        self.tray_small_action.setCheckable(True)
+        self.tray_small_action.triggered.connect(lambda: self.set_tray_model("small"))
+        self.model_action_group.addAction(self.tray_small_action)
+
+        self.tray_medium_action = self.model_menu.addAction("Medium (Beter, ~5GB)")
+        self.tray_medium_action.setCheckable(True)
+        self.tray_medium_action.triggered.connect(lambda: self.set_tray_model("medium"))
+        self.model_action_group.addAction(self.tray_medium_action)
+
+        self.tray_large_action = self.model_menu.addAction("Large (Best, ~10GB)")
+        self.tray_large_action.setCheckable(True)
+        self.tray_large_action.triggered.connect(lambda: self.set_tray_model("large"))
+        self.model_action_group.addAction(self.tray_large_action)
+
+        # Set initial selection based on current model
+        if self.selected_model_name == "tiny":
+            self.tray_tiny_action.setChecked(True)
+        elif self.selected_model_name == "small":
+            self.tray_small_action.setChecked(True)
+        elif self.selected_model_name == "medium":
+            self.tray_medium_action.setChecked(True)
+        elif self.selected_model_name == "large":
+            self.tray_large_action.setChecked(True)
+
+        tray_menu.addMenu(self.model_menu)
+
+        tray_menu.addSeparator()
+
         # Add input device selection submenu
         self.input_menu = QMenu("Input Selection", tray_menu)
         self.input_action_group = QActionGroup(self.input_menu)
@@ -770,6 +810,13 @@ Hier volgt de tekst:"""
 
         print(f"DEBUG: Model selection changed to: {model_name}")
         self.selected_model_name = model_name
+
+        # Update tray menu checkmarks if tray icon exists
+        if hasattr(self, 'tray_tiny_action'):
+            self.tray_tiny_action.setChecked(model_name == "tiny")
+            self.tray_small_action.setChecked(model_name == "small")
+            self.tray_medium_action.setChecked(model_name == "medium")
+            self.tray_large_action.setChecked(model_name == "large")
 
         # Check if already loaded
         if model_name in self.loaded_models:
@@ -2038,6 +2085,55 @@ Hier volgt de tekst:"""
 
         except Exception as e:
             print(f"ERROR: Failed to set tray input device: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def set_tray_model(self, model_name):
+        """Set the transcription model from the tray menu"""
+        try:
+            print(f"DEBUG: Tray menu - changing model to: {model_name}")
+
+            # Update the selected model
+            self.selected_model_name = model_name
+
+            # Update radio buttons in main window to match
+            if model_name == "tiny":
+                self.tiny_radio.setChecked(True)
+            elif model_name == "small":
+                self.small_radio.setChecked(True)
+            elif model_name == "medium":
+                self.medium_radio.setChecked(True)
+            elif model_name == "large":
+                self.large_radio.setChecked(True)
+
+            # Update tray menu checkmarks
+            self.tray_tiny_action.setChecked(model_name == "tiny")
+            self.tray_small_action.setChecked(model_name == "small")
+            self.tray_medium_action.setChecked(model_name == "medium")
+            self.tray_large_action.setChecked(model_name == "large")
+
+            # Check if model is already loaded
+            if model_name in self.loaded_models:
+                self.tray_icon.showMessage(
+                    "Model Geselecteerd",
+                    f"{model_name.capitalize()} model geselecteerd\n(reeds geladen)",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2000
+                )
+                print(f"DEBUG: {model_name} model already loaded")
+            else:
+                # Model needs to be loaded
+                self.tray_icon.showMessage(
+                    "Model Laden",
+                    f"{model_name.capitalize()} model wordt geladen...\nDit kan even duren.",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    3000
+                )
+                print(f"DEBUG: Loading {model_name} model...")
+                self.load_model_async(model_name)
+
+        except Exception as e:
+            print(f"ERROR: Failed to set tray model: {e}")
             import traceback
             traceback.print_exc()
 
