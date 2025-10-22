@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QLineEdit, QScrollArea, QSystemTrayIcon, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QSize
-from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPainter, QPixmap, QPen
+from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPainter, QPixmap, QPen, QActionGroup
 
 
 def create_tray_icon(recording=False):
@@ -162,6 +162,16 @@ Hier volgt de tekst:"""
 
         tray_menu.addSeparator()
 
+        # Add input device selection submenu
+        self.input_menu = QMenu("Input Selection", tray_menu)
+        self.input_action_group = QActionGroup(self.input_menu)
+        self.input_action_group.setExclusive(True)
+
+        # Will be populated by refresh_tray_input_devices()
+        tray_menu.addMenu(self.input_menu)
+
+        tray_menu.addSeparator()
+
         # Add show window action
         show_action = tray_menu.addAction("Toon Venster")
         show_action.triggered.connect(self.show)
@@ -177,6 +187,9 @@ Hier volgt de tekst:"""
 
         # Show the tray icon
         self.tray_icon.show()
+
+        # Populate input devices in tray menu
+        self.refresh_tray_input_devices()
 
     def on_tray_icon_activated(self, reason):
         """Handle tray icon activation (click)"""
@@ -1931,9 +1944,100 @@ Hier volgt de tekst:"""
             self.status_bar.showMessage(f"{len(devices)} audio apparaten gevonden")
             print(f"DEBUG: Found {len(devices)} audio input devices")
 
+            # Also refresh tray menu
+            self.refresh_tray_input_devices()
+
         except Exception as e:
             self.status_bar.showMessage(f"Fout bij ophalen audio apparaten: {str(e)}")
             print(f"ERROR: Failed to refresh audio devices: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def refresh_tray_input_devices(self):
+        """Refresh the input device list in the tray menu"""
+        # Check if tray icon is initialized
+        if not hasattr(self, 'input_menu'):
+            return
+
+        try:
+            # Clear existing actions
+            self.input_menu.clear()
+
+            # Get devices from the recorder
+            devices = self.recorder.get_audio_devices()
+
+            # Get current device index
+            current_device = self.recorder.input_device_index
+
+            # Add default device option
+            default_action = self.input_menu.addAction("Standaard (Systeem Default)")
+            default_action.setCheckable(True)
+            default_action.setData(None)
+            default_action.triggered.connect(lambda checked, idx=None: self.set_tray_input_device(idx))
+            self.input_action_group.addAction(default_action)
+
+            # Check default if no device is selected
+            if current_device is None:
+                default_action.setChecked(True)
+
+            # Add separator
+            self.input_menu.addSeparator()
+
+            # Add all available input devices
+            for device in devices:
+                device_name = device['name']
+                device_index = device['index']
+
+                action = self.input_menu.addAction(device_name)
+                action.setCheckable(True)
+                action.setData(device_index)
+                action.triggered.connect(lambda checked, idx=device_index: self.set_tray_input_device(idx))
+                self.input_action_group.addAction(action)
+
+                # Check if this is the current device
+                if current_device == device_index:
+                    action.setChecked(True)
+
+            print(f"DEBUG: Tray menu updated with {len(devices)} audio input devices")
+
+        except Exception as e:
+            print(f"ERROR: Failed to refresh tray input devices: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def set_tray_input_device(self, device_index):
+        """Set the input device from the tray menu"""
+        try:
+            # Set the device on the recorder
+            self.recorder.set_input_device(device_index)
+
+            # Update the combo box in settings to match
+            for i in range(self.audio_device_combo.count()):
+                if self.audio_device_combo.itemData(i) == device_index:
+                    self.audio_device_combo.setCurrentIndex(i)
+                    break
+
+            # Show notification
+            device_name = "Standaard (Systeem Default)" if device_index is None else f"Device {device_index}"
+            # Try to get the actual device name
+            if device_index is not None:
+                devices = self.recorder.get_audio_devices()
+                for device in devices:
+                    if device['index'] == device_index:
+                        device_name = device['name']
+                        break
+
+            self.tray_icon.showMessage(
+                "Input Device Gewijzigd",
+                f"Audio input ingesteld op:\n{device_name}",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+
+            print(f"DEBUG: Input device set to: {device_name} (index: {device_index})")
+
+        except Exception as e:
+            print(f"ERROR: Failed to set tray input device: {e}")
             import traceback
             traceback.print_exc()
 
