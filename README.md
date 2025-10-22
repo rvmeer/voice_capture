@@ -1,20 +1,21 @@
 # Audio Transcriptie Applicatie met Whisper
 
-Een professionele desktop applicatie voor het opnemen, transcriberen en samenvatten van audio met OpenAI's Whisper model (geoptimaliseerd voor snelheid op CPU).
+Een professionele tray-only desktop applicatie voor het opnemen en transcriberen van audio met OpenAI's Whisper model. Draait volledig in de macOS menubalk met API toegang via FastAPI.
 
 ## Features
 
-✅ **Intuïtieve GUI** - Moderne, gebruiksvriendelijke interface met PyQt6
-✅ **Audio Opname** - Opname van microfoon audio (macOS optimized)
-✅ **Whisper Transcriptie** - Snelle transcriptie met Whisper tiny model (5-10 sec)
+✅ **System Tray Interface** - Volledige bediening via macOS menubalk icoon
+✅ **Click-to-Record** - Eén klik om opname te starten/stoppen
+✅ **Multiple Whisper Models** - Keuze uit tiny/small/medium/large modellen
+✅ **Live Transcriptie** - Incrementele transcriptie tijdens opname (segmented)
+✅ **Audio Input Selection** - Kies je microfoon/audio input via tray menu
 ✅ **Nederlandse Taal** - Geoptimaliseerd voor Nederlands
-✅ **Samenvatting** - Automatische generatie van samenvattingen met kernwoorden
-✅ **Recording Timer** - Real-time weergave van opnameduur
-✅ **Tab Interface** - Gescheiden weergave van transcriptie en samenvatting
-✅ **Opname Historie** - Volledige lijst van alle opnames met metadata
-✅ **Audio Playback** - Luister opnames terug binnen de app
-✅ **Hernoemen** - Geef opnames betekenisvolle namen
-✅ **JSON Opslag** - Alle transcripties en samenvattingen worden opgeslagen
+✅ **Auto-save** - Automatisch opslaan zonder dialogen
+✅ **Empty Recording Detection** - Automatisch verwijderen van lege opnames
+✅ **Model Caching** - Gekozen modellen blijven in geheugen voor snelheid
+✅ **Configurable Segments** - Instelbare segment lengte en overlap
+✅ **FastAPI Server** - Volledige API toegang tot opnames
+✅ **MCP Server** - Claude Desktop integratie
 
 ## Installatie
 
@@ -30,6 +31,8 @@ brew install portaudio ffmpeg
 pip install -r requirements.txt
 ```
 
+**Let op**: Er is geen `.env` bestand of configuratie nodig. Alle instellingen worden gedaan via het tray menu.
+
 ## Gebruik
 
 Start de applicatie:
@@ -39,45 +42,76 @@ python main.py
 ```
 
 De applicatie start automatisch:
-- 🎤 **Tray Icon** - Voor opnames via systeem tray
+- 🎤 **Tray Icon** - Wit cirkel icoon verschijnt in de macOS menubalk
 - 🌐 **OpenAPI Server** - Op http://localhost:8000
   - API documentatie: http://localhost:8000/docs
   - ReDoc: http://localhost:8000/redoc
   - OpenAPI schema: http://localhost:8000/openapi.json
 
-### Nieuwe Opname:
+### Nieuwe Opname via Tray Icon:
 
-1. **Wacht** tot het Whisper model is geladen
-2. **Klik** op "Opname Starten" om audio op te nemen
-3. **Spreek** in je microfoon
-4. **Klik** op "Opname Stoppen" wanneer je klaar bent
-5. **Geef een naam** aan je opname
-6. **Bekijk** de transcriptie en samenvatting in de tabs
+1. **Klik** op het witte cirkel icoon in de menubalk om opname te starten
+   - Icoon verandert naar wit-met-rood (opname actief)
+   - Notificatie bevestigt opname start
+2. **Spreek** in je microfoon
+3. **Klik nogmaals** op het icoon om te stoppen
+   - Opname wordt automatisch opgeslagen met timestamp
+   - Live transcriptie start tijdens opname
+4. **Transcriptie** wordt incrementeel gegenereerd en opgeslagen
 
-### Opnames Beheren:
+### Instellingen via Tray Menu:
 
-- **Klik op een opname** in de lijst om deze te laden
-- **▶ Afspelen** - Luister de audio terug
-- **✏️ Hernoemen** - Geef de opname een nieuwe naam
-- Alle data wordt automatisch opgeslagen in `recordings/recordings.json`
+**Rechtermuisklik** (of Control+klik) op het tray icoon voor:
+- **Transcription Model** - Kies tussen tiny/small/medium/large
+- **Input Selection** - Selecteer je audio invoer apparaat
+- **Afsluiten** - Sluit de applicatie
+
+### Opname Structuur:
+
+Elke opname wordt opgeslagen in een eigen folder:
+```
+recordings/
+└── recording_YYYYMMDD_HHMMSS/
+    ├── recording_YYYYMMDD_HHMMSS.json        # Metadata
+    ├── recording_YYYYMMDD_HHMMSS.wav         # Audio bestand
+    ├── transcription_YYYYMMDD_HHMMSS.txt     # Transcriptie
+    └── segments/                              # Audio segmenten
+        ├── segment_000.wav
+        ├── segment_001.wav
+        └── ...
+```
 
 ## Systeemvereisten
 
 - Python 3.8+
-- macOS (geoptimaliseerd voor MacBook microfoon)
-- ~500MB vrij geheugen voor Whisper tiny model
+- macOS (geoptimaliseerd voor macOS menubalk)
+- Minimaal geheugen:
+  - Tiny model: ~1GB RAM
+  - Small model: ~2GB RAM
+  - Medium model: ~5GB RAM
+  - Large model: ~10GB RAM
 - Microfoon toegang
+- Portaudio en FFmpeg (via Homebrew)
 
 ## Projectstructuur
 
 ```
-whisper_demo/
-├── main.py                    # Hoofdapplicatie
+voice_capture/
+├── main.py                    # Hoofdapplicatie (tray + FastAPI server)
+├── audio_recorder.py          # Audio opname met segmentatie
+├── recording_manager.py       # Opslag beheer (JSON per opname)
+├── openapi_server.py          # FastAPI server voor API toegang
+├── mcp_server.py              # MCP server voor Claude Desktop
 ├── requirements.txt           # Python afhankelijkheden
-├── recordings/                # Opgeslagen bestanden (auto-aangemaakt)
-│   ├── recording_*.wav       # Audio bestanden
-│   └── recordings.json       # Metadata, transcripties, samenvattingen
-└── README.md                 # Deze file
+├── recordings/                # Opgeslagen opnames (auto-aangemaakt)
+│   └── recording_YYYYMMDD_HHMMSS/
+│       ├── *.json            # Metadata per opname
+│       ├── *.wav             # Audio bestand
+│       ├── *.txt             # Transcriptie
+│       └── segments/         # Audio segmenten
+├── README.md                  # Deze file
+├── OPENAPI_README.md          # OpenAPI server documentatie
+└── MCP_README.md              # MCP server documentatie
 ```
 
 ## API Toegang
@@ -105,14 +139,26 @@ Voor gebruik met Claude Desktop, zie [MCP_README.md](MCP_README.md).
 
 ## Technische Details
 
-- **GUI Framework**: PyQt6 (tray-only mode)
-- **API Server**: FastAPI + Uvicorn (automatisch gestart)
+- **GUI Framework**: PyQt6 (tray-only mode, geen venster)
+- **API Server**: FastAPI + Uvicorn (automatisch gestart op port 8000)
 - **Audio Opname**: PyAudio (16kHz, mono)
-- **Audio Playback**: macOS afplay (system command)
+- **Segmentatie**: Configureerbare segment lengte (10-120s) met overlap (5-60s)
 - **Transcriptie**: OpenAI Whisper (tiny/small/medium/large models)
-- **Taal**: Nederlands (configureerbaar)
-- **Threading**: Asynchrone verwerking voor soepele UX
-- **Opslag**: JSON voor metadata (ISO 8601 duration), WAV voor audio
+  - CPU-only uitvoering
+  - Model caching voor snelheid
+  - Incrementele transcriptie tijdens opname
+  - Automatische overlap detectie en verwijdering
+- **Taal**: Nederlands (hardcoded in transcriptie)
+- **Threading**:
+  - Audio opname in aparte thread
+  - Transcriptie in worker threads
+  - FastAPI server in daemon thread
+- **Opslag**:
+  - JSON per opname (ISO 8601 duration format)
+  - WAV voor audio (16bit PCM)
+  - TXT voor transcriptie
+  - Automatische folder structuur per opname
+- **Empty Recording Detection**: Automatisch verwijderen van opnames zonder transcriptie
 
 ## Licentie
 
