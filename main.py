@@ -70,6 +70,7 @@ class TranscriptionApp(QMainWindow):
     summary_complete = pyqtSignal(str)
     model_loaded = pyqtSignal(str, object)  # (model_name, model_object)
     segment_transcribed = pyqtSignal(str)  # Signal for incremental transcription updates
+    ollama_models_loaded = pyqtSignal(list)  # Signal for Ollama models loaded
 
     def __init__(self):
         super().__init__()
@@ -91,6 +92,7 @@ class TranscriptionApp(QMainWindow):
         self.summary_complete.connect(self.on_summary_complete)
         self.model_loaded.connect(self.on_model_loaded)
         self.segment_transcribed.connect(self.on_segment_transcribed)
+        self.ollama_models_loaded.connect(self.on_ollama_models_loaded)
 
         # Track pending transcription
         self.pending_transcription = False
@@ -146,6 +148,9 @@ Hier volgt de tekst:"""
 
         # Load default model (tiny) on startup
         QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
+
+        # Load Ollama models in background on startup
+        QTimer.singleShot(1000, self.load_ollama_models_async)
 
     def init_tray_icon(self):
         """Initialize system tray icon"""
@@ -1918,6 +1923,44 @@ Hier volgt de tekst:"""
         if is_ollama and not self.ollama_available_models:
             self.refresh_ollama_models()
 
+    def load_ollama_models_async(self):
+        """Load Ollama models in background without showing dialogs"""
+        def worker():
+            try:
+                # Remove /v1 suffix if present for the tags endpoint
+                base_url = self.ollama_url.replace("/v1", "").rstrip("/")
+
+                response = requests.get(f"{base_url}/api/tags", timeout=5)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    models = [model["name"] for model in data.get("models", [])]
+
+                    if models:
+                        # Emit signal to update UI in main thread
+                        self.ollama_models_loaded.emit(models)
+                        print(f"DEBUG: Loaded {len(models)} Ollama models in background")
+            except Exception as e:
+                print(f"DEBUG: Could not load Ollama models in background: {e}")
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    def on_ollama_models_loaded(self, models):
+        """Handle Ollama models loaded signal (main thread)"""
+        self.ollama_available_models = models
+        self.ollama_model_combo.clear()
+        self.ollama_model_combo.addItems(models)
+
+        # Set current model if it exists in the list
+        if self.ollama_model in models:
+            self.ollama_model_combo.setCurrentText(self.ollama_model)
+
+        # Update tray menu
+        self.refresh_tray_summary_models()
+
+        print(f"DEBUG: Updated UI with {len(models)} Ollama models")
+
     def refresh_ollama_models(self):
         """Fetch available models from Ollama"""
         ollama_url = self.ollama_url_input.text().strip()
@@ -1941,6 +1984,9 @@ Hier volgt de tekst:"""
                     # Set current model if it exists in the list
                     if self.ollama_model in models:
                         self.ollama_model_combo.setCurrentText(self.ollama_model)
+
+                    # Update tray menu
+                    self.refresh_tray_summary_models()
 
                     self.status_bar.showMessage(f"{len(models)} Ollama modellen gevonden")
                     QMessageBox.information(
