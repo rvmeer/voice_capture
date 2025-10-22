@@ -11,7 +11,6 @@ import threading
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from dotenv import load_dotenv
 
 import whisper
 import numpy as np
@@ -19,9 +18,6 @@ from openai import AzureOpenAI, OpenAI
 import requests
 import uvicorn
 import torch
-
-# Load environment variables
-load_dotenv()
 
 # Import custom modules
 from audio_recorder import AudioRecorder

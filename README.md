@@ -1,6 +1,6 @@
 # Audio Transcriptie Applicatie met Whisper
 
-Een professionele desktop applicatie voor het opnemen, transcriberen en samenvatten van audio met OpenAI's Whisper tiny model (geoptimaliseerd voor snelheid op CPU).
+Een professionele desktop applicatie voor het opnemen, transcriberen en samenvatten van audio met OpenAI's Whisper model (geoptimaliseerd voor snelheid op CPU).
 
 ## Features
 
@@ -118,11 +118,4 @@ Voor gebruik met Claude Desktop, zie [MCP_README.md](MCP_README.md).
 
 MIT License
 
-### Instellingen macbook
 
-Aggregate device op macbook mic en blackhole
-Multi output device op minstens blackhole
-
-Nu stel je bij de macbook (option click) in:
-  output -> Multi output device
-  input -> Aggregate device
