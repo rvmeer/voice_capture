@@ -75,12 +75,8 @@ Geeft de volledige JSON metadata voor een specifieke opname.
   "summary": "--- Deelnemers ---\n- Alice - Voorstander van nieuwe aanpak\n...",
   "duration": 245,
   "model": "small",
-  "ai_provider": "azure",
   "segment_duration": 10,
   "overlap_duration": 5,
-  "ollama_url": "",
-  "ollama_model": "",
-  "summary_prompt": "Maak een samenvatting..."
 }
 ```
 

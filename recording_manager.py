@@ -66,8 +66,7 @@ class RecordingManager:
             print(f"Error saving recording: {e}")
 
     def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model="",
-                      ai_provider="azure", segment_duration=30, overlap_duration=15,
-                      ollama_url="", ollama_model="", summary_prompt=""):
+                      segment_duration=30, overlap_duration=15):
         """Add a new recording with all settings"""
         recording = {
             "id": timestamp,
@@ -78,12 +77,8 @@ class RecordingManager:
             "summary": summary,
             "duration": duration,  # Duration in seconds
             "model": model,  # Whisper model used for transcription
-            "ai_provider": ai_provider,  # "azure" or "ollama"
             "segment_duration": segment_duration,  # Segment length in seconds
             "overlap_duration": overlap_duration,  # Overlap length in seconds
-            "ollama_url": ollama_url,  # Ollama server URL
-            "ollama_model": ollama_model,  # Ollama model name
-            "summary_prompt": summary_prompt  # Summary prompt text
         }
         self.recordings.insert(0, recording)  # Add to beginning
         self.save_recording(recording)
