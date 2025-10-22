@@ -1,6 +1,8 @@
-# MCP Server voor Whisper Demo Recordings
+# MCP Server voor Audio Transcriptie Applicatie
 
-Deze MCP (Model Context Protocol) server geeft toegang tot je opnames, metadata en transcripties.
+Deze MCP (Model Context Protocol) server geeft toegang tot je opnames, metadata en transcripties vanuit de Audio Transcriptie Applicatie.
+
+**Cross-platform**: Werkt op macOS, Windows en Linux
 
 ## Installatie
 
@@ -72,13 +74,14 @@ Geeft de volledige JSON metadata voor een specifieke opname.
   "name": "Meeting met team",
   "date": "2025-01-22 14:30:22",
   "transcription": "Welkom allemaal bij deze meeting...",
-  "summary": "--- Deelnemers ---\n- Alice - Voorstander van nieuwe aanpak\n...",
-  "duration": 245,
+  "duration": "PT4M5S",
   "model": "small",
   "segment_duration": 10,
-  "overlap_duration": 5,
+  "overlap_duration": 5
 }
 ```
+
+**Opmerking**: De `duration` is in ISO 8601 format (bijv. "PT4M5S" = 4 minuten en 5 seconden)
 
 ### 3. `get_transcription`
 Geeft alleen de transcriptie tekst voor een specifieke opname.
@@ -124,20 +127,55 @@ Update de titel/naam van een specifieke opname.
 
 ## Integratie met Claude Desktop
 
-Om deze MCP server te gebruiken met Claude Desktop, voeg het volgende toe aan je Claude configuratie (`~/Library/Application Support/Claude/claude_desktop_config.json` op macOS):
+Om deze MCP server te gebruiken met Claude Desktop, voeg het volgende toe aan je Claude configuratie bestand:
+
+### macOS
+Bestand: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
-    "whisper-recordings": {
+    "voice-capture": {
       "command": "python",
-      "args": ["/Users/rvmeer/git/whisper_demo/mcp_server.py"]
+      "args": ["/absolute/path/to/voice_capture/mcp_server.py"]
     }
   }
 }
 ```
 
-Pas het pad aan naar de locatie van je `mcp_server.py` bestand.
+### Windows
+Bestand: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "python",
+      "args": ["C:\\absolute\\path\\to\\voice_capture\\mcp_server.py"]
+    }
+  }
+}
+```
+
+### Linux
+Bestand: `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "python3",
+      "args": ["/absolute/path/to/voice_capture/mcp_server.py"]
+    }
+  }
+}
+```
+
+**Belangrijk**:
+- Vervang het pad door de absolute locatie van je `mcp_server.py` bestand
+- Op Windows gebruik je backslashes (`\`) of forward slashes met dubbele escaping (`\\`)
+- Op Linux gebruik mogelijk `python3` in plaats van `python`
+- Herstart Claude Desktop na het wijzigen van de configuratie
 
 ## Foutafhandeling
 
@@ -151,8 +189,17 @@ Alle tools geven een error response als er iets misgaat:
 
 ## Technische Details
 
-- De server gebruikt `stdio` voor communicatie (standaard MCP transport)
-- Recordings worden geladen uit de `recordings/` directory
-- Elke opname staat in een subfolder `recording_<timestamp>/`
-- Metadata wordt gelezen uit `recording_<timestamp>.json`
-- Transcripties worden bij voorkeur gelezen uit `transcription_<timestamp>.txt`, met fallback naar de JSON
+- **Communicatie**: De server gebruikt `stdio` voor communicatie (standaard MCP transport)
+- **Opslag**: Recordings worden geladen uit de `recordings/` directory
+- **Structuur**: Elke opname staat in een subfolder `recording_<timestamp>/`
+- **Metadata**: Wordt gelezen uit `recording_<timestamp>.json` (per opname)
+- **Transcripties**: Worden bij voorkeur gelezen uit `transcription_<timestamp>.txt`, met fallback naar de JSON
+- **Cross-platform**: Werkt identiek op macOS, Windows en Linux
+- **Path handling**: Gebruikt `pathlib.Path` voor cross-platform bestandspaden
+
+## Vereisten
+
+- Python 3.8+
+- `mcp` library (`pip install mcp`)
+- Draaiende Audio Transcriptie Applicatie (voor nieuwe opnames)
+- Toegang tot de `recordings/` directory
