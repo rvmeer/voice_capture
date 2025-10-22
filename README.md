@@ -38,6 +38,13 @@ Start de applicatie:
 python main.py
 ```
 
+De applicatie start automatisch:
+- 🎤 **Tray Icon** - Voor opnames via systeem tray
+- 🌐 **OpenAPI Server** - Op http://localhost:8000
+  - API documentatie: http://localhost:8000/docs
+  - ReDoc: http://localhost:8000/redoc
+  - OpenAPI schema: http://localhost:8000/openapi.json
+
 ### Nieuwe Opname:
 
 1. **Wacht** tot het Whisper model is geladen

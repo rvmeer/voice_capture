@@ -17,6 +17,7 @@ import whisper
 import numpy as np
 from openai import AzureOpenAI, OpenAI
 import requests
+import uvicorn
 
 # Load environment variables
 load_dotenv()
@@ -1162,17 +1163,46 @@ class TranscriptionApp(QMainWindow):
         # Check if all segments are done
         if not self.segments_to_transcribe and not self.is_transcribing_segment:
             print(f"DEBUG: All segments transcribed, saving to database")
-            # All segments complete - save transcription, model, and all settings to database
-            self.recording_manager.update_recording(
-                self.current_recording_id,
-                transcription=full_text,
-                model=self.selected_model_name,
-                segment_duration=self.segment_duration,
-                overlap_duration=self.overlap_duration
-            )
-            # Refresh list to show updated model and settings (disabled in tray-only mode)
-            # self.refresh_recording_list()
-            print(f"DEBUG: Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
+
+            # Check if transcription is empty
+            if not full_text.strip():
+                print(f"DEBUG: Transcription is empty, deleting recording folder")
+                # Delete the entire recording folder
+                import shutil
+                rec_dir = Path(f"recordings/recording_{self.current_recording_id}")
+                if rec_dir.exists() and rec_dir.is_dir():
+                    try:
+                        shutil.rmtree(rec_dir)
+                        print(f"DEBUG: Deleted empty recording folder: {rec_dir}")
+
+                        # Remove from in-memory recordings list
+                        self.recording_manager.recordings = [
+                            rec for rec in self.recording_manager.recordings
+                            if rec.get("id") != self.current_recording_id
+                        ]
+
+                        # Show notification in tray-only mode
+                        if hasattr(self, 'tray_icon'):
+                            self.tray_icon.showMessage(
+                                "Opname Verwijderd",
+                                "Opname was leeg en is automatisch verwijderd",
+                                QSystemTrayIcon.MessageIcon.Information,
+                                2000
+                            )
+                    except Exception as e:
+                        print(f"ERROR: Failed to delete empty recording folder: {e}")
+            else:
+                # All segments complete - save transcription, model, and all settings to database
+                self.recording_manager.update_recording(
+                    self.current_recording_id,
+                    transcription=full_text,
+                    model=self.selected_model_name,
+                    segment_duration=self.segment_duration,
+                    overlap_duration=self.overlap_duration
+                )
+                # Refresh list to show updated model and settings (disabled in tray-only mode)
+                # self.refresh_recording_list()
+                print(f"DEBUG: Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
 
 
     def retranscribe_with_segments(self):
@@ -1345,23 +1375,59 @@ class TranscriptionApp(QMainWindow):
                 self.transcription_text.setPlainText(transcription_text)
 
             print(f"DEBUG: Text set in UI, updating labels")
-            if hasattr(self, 'status_label'):
-                self.status_label.setText("✅ Transcriptie voltooid")
-            if hasattr(self, 'status_bar'):
-                self.status_bar.showMessage("Transcriptie succesvol voltooid")
 
-            # Update recording with transcription, model, and all settings
-            print(f"DEBUG: Updating recording in database")
-            self.recording_manager.update_recording(
-                self.current_recording_id,
-                transcription=transcription_text,
-                model=self.selected_model_name,
-                segment_duration=self.segment_duration,
-                overlap_duration=self.overlap_duration
-            )
+            # Check if transcription is empty
+            if not transcription_text.strip():
+                print(f"DEBUG: Transcription is empty, deleting recording folder")
+                # Delete the entire recording folder
+                import shutil
+                rec_dir = Path(f"recordings/recording_{self.current_recording_id}")
+                if rec_dir.exists() and rec_dir.is_dir():
+                    try:
+                        shutil.rmtree(rec_dir)
+                        print(f"DEBUG: Deleted empty recording folder: {rec_dir}")
 
-            # Refresh the recording list to show updated model (disabled in tray-only mode)
-            # self.refresh_recording_list()
+                        # Remove from in-memory recordings list
+                        self.recording_manager.recordings = [
+                            rec for rec in self.recording_manager.recordings
+                            if rec.get("id") != self.current_recording_id
+                        ]
+
+                        # Update status
+                        if hasattr(self, 'status_label'):
+                            self.status_label.setText("❌ Opname was leeg en is verwijderd")
+                        if hasattr(self, 'status_bar'):
+                            self.status_bar.showMessage("Opname was leeg en is automatisch verwijderd")
+
+                        # Show notification in tray-only mode
+                        if hasattr(self, 'tray_icon'):
+                            self.tray_icon.showMessage(
+                                "Opname Verwijderd",
+                                "Opname was leeg en is automatisch verwijderd",
+                                QSystemTrayIcon.MessageIcon.Information,
+                                2000
+                            )
+                    except Exception as e:
+                        print(f"ERROR: Failed to delete empty recording folder: {e}")
+            else:
+                # Transcription is not empty - save it
+                if hasattr(self, 'status_label'):
+                    self.status_label.setText("✅ Transcriptie voltooid")
+                if hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage("Transcriptie succesvol voltooid")
+
+                # Update recording with transcription, model, and all settings
+                print(f"DEBUG: Updating recording in database")
+                self.recording_manager.update_recording(
+                    self.current_recording_id,
+                    transcription=transcription_text,
+                    model=self.selected_model_name,
+                    segment_duration=self.segment_duration,
+                    overlap_duration=self.overlap_duration
+                )
+
+                # Refresh the recording list to show updated model (disabled in tray-only mode)
+                # self.refresh_recording_list()
 
 
 
@@ -1914,12 +1980,49 @@ class TranscriptionApp(QMainWindow):
         print("DEBUG: Cleanup complete")
 
 
+def start_openapi_server():
+    """Start OpenAPI server in a background thread"""
+    try:
+        # Import the FastAPI app
+        from openapi_server import app
+
+        # Configure uvicorn to run without access logs to reduce console clutter
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            access_log=False
+        )
+        server = uvicorn.Server(config)
+
+        print("=" * 60)
+        print("🚀 OpenAPI Server Starting...")
+        print(f"   API URL: http://localhost:8000")
+        print(f"   Swagger UI: http://localhost:8000/docs")
+        print(f"   ReDoc: http://localhost:8000/redoc")
+        print(f"   OpenAPI Schema: http://localhost:8000/openapi.json")
+        print("=" * 60)
+
+        # Run the server (this will block in this thread)
+        server.run()
+    except Exception as e:
+        print(f"ERROR: Failed to start OpenAPI server: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     """Main application entry point"""
     import signal
 
     # Handle Ctrl+C gracefully
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+    # Start OpenAPI server in background thread
+    api_thread = threading.Thread(target=start_openapi_server, daemon=True, name="OpenAPI-Server")
+    api_thread.start()
+    print("DEBUG: OpenAPI server thread started")
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
