@@ -7,3 +7,6 @@ transformers
 pyannote.audio
 python-dotenv
 openai
+fastapi
+uvicorn[standard]
+pydantic
