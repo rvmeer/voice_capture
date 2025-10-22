@@ -78,7 +78,7 @@ class TranscriptionApp(QMainWindow):
 
         # Model caching: store loaded models
         self.loaded_models = {}  # {model_name: model_object}
-        self.selected_model_name = "small"  # Default selected model
+        self.selected_model_name = "medium"  # Default selected model
 
         self.is_recording = False
         self.recording_time = 0

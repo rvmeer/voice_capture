@@ -13,12 +13,17 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
+# Import recording manager for title updates
+from recording_manager import RecordingManager
 
 # Initialize MCP server
 server = Server("whisper-recordings-server")
 
 # Path to recordings directory
 RECORDINGS_DIR = Path(__file__).parent / "recordings"
+
+# Initialize recording manager
+recording_manager = RecordingManager()
 
 
 def load_recordings() -> list[dict]:
@@ -124,6 +129,24 @@ async def handle_list_tools() -> list[Tool]:
                 },
                 "required": ["recording_id"]
             }
+        ),
+        Tool(
+            name="update_recording_title",
+            description="Update the title/name of a specific recording",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "recording_id": {
+                        "type": "string",
+                        "description": "The ID (timestamp) of the recording to update"
+                    },
+                    "new_title": {
+                        "type": "string",
+                        "description": "The new title/name for the recording"
+                    }
+                },
+                "required": ["recording_id", "new_title"]
+            }
         )
     ]
 
@@ -209,6 +232,48 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
                 text=transcription
             )
         ]
+
+    elif name == "update_recording_title":
+        # Update recording title
+        recording_id = arguments.get("recording_id")
+        new_title = arguments.get("new_title")
+
+        if not recording_id:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": "recording_id is required"})
+                )
+            ]
+
+        if not new_title:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": "new_title is required"})
+                )
+            ]
+
+        # Update the title using recording manager
+        success = recording_manager.update_recording_title(recording_id, new_title)
+
+        if success:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "success": True,
+                        "message": f"Successfully updated title for recording '{recording_id}' to '{new_title}'"
+                    })
+                )
+            ]
+        else:
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": f"Recording with id '{recording_id}' not found"})
+                )
+            ]
 
     else:
         return [

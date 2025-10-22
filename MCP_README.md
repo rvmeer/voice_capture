@@ -99,6 +99,29 @@ Welkom allemaal bij deze meeting. Vandaag gaan we het hebben over...
 [volledige transcriptie tekst]
 ```
 
+### 4. `update_recording_title`
+Update de titel/naam van een specifieke opname.
+
+**Parameters:**
+- `recording_id` (string, verplicht): Het ID (timestamp) van de opname
+- `new_title` (string, verplicht): De nieuwe titel/naam voor de opname
+
+**Voorbeeld aanroep:**
+```json
+{
+  "recording_id": "20250122_143022",
+  "new_title": "Team Meeting - Q1 Planning"
+}
+```
+
+**Voorbeeld response:**
+```json
+{
+  "success": true,
+  "message": "Successfully updated title for recording '20250122_143022' to 'Team Meeting - Q1 Planning'"
+}
+```
+
 ## Integratie met Claude Desktop
 
 Om deze MCP server te gebruiken met Claude Desktop, voeg het volgende toe aan je Claude configuratie (`~/Library/Application Support/Claude/claude_desktop_config.json` op macOS):

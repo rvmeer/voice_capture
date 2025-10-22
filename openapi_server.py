@@ -13,6 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 
+# Import recording manager
+from recording_manager import RecordingManager
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -32,6 +35,9 @@ app.add_middleware(
 
 # Path to recordings directory
 RECORDINGS_DIR = Path(__file__).parent / "recordings"
+
+# Initialize recording manager
+recording_manager = RecordingManager()
 
 
 # Pydantic models for requests/responses
@@ -58,6 +64,17 @@ class RecordingDetail(BaseModel):
 class TranscriptionResponse(BaseModel):
     recording_id: str
     transcription: str
+
+
+class UpdateTitleRequest(BaseModel):
+    new_title: str = Field(..., description="The new title/name for the recording", min_length=1)
+
+
+class UpdateTitleResponse(BaseModel):
+    success: bool
+    message: str
+    recording_id: str
+    new_title: str
 
 
 class ErrorResponse(BaseModel):
@@ -140,6 +157,7 @@ async def root():
             "GET /recordings": "List all recordings",
             "GET /recordings/{recording_id}": "Get specific recording metadata",
             "GET /recordings/{recording_id}/transcription": "Get recording transcription",
+            "PUT /recordings/{recording_id}/title": "Update recording title",
             "GET /openapi.json": "OpenAPI schema"
         }
     }
@@ -206,6 +224,39 @@ async def get_transcription(recording_id: str):
         "recording_id": recording_id,
         "transcription": transcription
     }
+
+
+@app.put(
+    "/recordings/{recording_id}/title",
+    response_model=UpdateTitleResponse,
+    summary="Update recording title",
+    description="Updates the title/name of a specific recording"
+)
+async def update_recording_title(recording_id: str, request: UpdateTitleRequest):
+    """Update the title/name of a specific recording"""
+    # Check if recording exists
+    recording = get_recording_by_id(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Recording with id '{recording_id}' not found"
+        )
+
+    # Update the title using recording manager
+    success = recording_manager.update_recording_title(recording_id, request.new_title)
+
+    if success:
+        return {
+            "success": True,
+            "message": f"Successfully updated title for recording '{recording_id}'",
+            "recording_id": recording_id,
+            "new_title": request.new_title
+        }
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update recording title"
+        )
 
 
 # Health check endpoint

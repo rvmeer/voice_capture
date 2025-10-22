@@ -161,3 +161,12 @@ class RecordingManager:
             if rec["id"] == recording_id:
                 return rec
         return None
+
+    def update_recording_title(self, recording_id, new_title):
+        """Update the title/name of a recording"""
+        for rec in self.recordings:
+            if rec["id"] == recording_id:
+                rec["name"] = new_title
+                self.save_recording(rec)
+                return True
+        return False

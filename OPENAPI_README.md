@@ -92,7 +92,26 @@ Response:
 }
 ```
 
-### 5. **GET /health** - Health check
+### 5. **PUT /recordings/{recording_id}/title** - Update titel
+Update de titel/naam van een opname
+
+```bash
+curl -X PUT http://localhost:8000/recordings/20251022_171823/title \
+  -H "Content-Type: application/json" \
+  -d '{"new_title": "Nieuwe Titel voor Opname"}'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Successfully updated title for recording '20251022_171823'",
+  "recording_id": "20251022_171823",
+  "new_title": "Nieuwe Titel voor Opname"
+}
+```
+
+### 6. **GET /health** - Health check
 Server status check
 
 ```bash
@@ -125,6 +144,7 @@ Om deze API als tool in Open-WebUI te gebruiken:
    - `get_recordings()` - Lijst alle opnames
    - `get_recording(recording_id)` - Haal specifieke opname op
    - `get_transcription(recording_id)` - Haal transcriptie op
+   - `update_recording_title(recording_id, new_title)` - Update opname titel
 
 ### Voorbeeld gebruik in Open-WebUI chat
 
@@ -137,6 +157,9 @@ AI: [gebruikt get_transcription tool]
 
 Gebruiker: Wat zijn de details van de meest recente opname?
 AI: [gebruikt get_recordings en dan get_recording tools]
+
+Gebruiker: Hernoem opname 20251022_171823 naar "Meeting Notes"
+AI: [gebruikt update_recording_title tool]
 ```
 
 ## Server Configuratie
