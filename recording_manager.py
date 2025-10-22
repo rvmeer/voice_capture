@@ -1,6 +1,6 @@
 """
 Recording Manager Module
-Manages recording metadata and storage
+Manages recording metadata and storage with subfolder structure
 """
 
 import json
@@ -12,91 +12,58 @@ from pathlib import Path
 class RecordingManager:
     """Manages recording metadata and storage"""
 
-    def __init__(self, data_file="recordings/recordings.json"):
-        self.data_file = data_file
+    def __init__(self, recordings_dir="recordings"):
+        self.recordings_dir = Path(recordings_dir)
         self.recordings = []
         self.load_recordings()
 
     def load_recordings(self):
-        """Load recordings from JSON file"""
+        """Load recordings from individual JSON files in subfolders"""
+        self.recordings = []
+
         try:
-            if Path(self.data_file).exists():
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    self.recordings = json.load(f)
+            # Create recordings directory if it doesn't exist
+            self.recordings_dir.mkdir(exist_ok=True)
 
-                # Migrate old recordings to add missing fields
-                needs_save = False
-                default_prompt = """Maak een samenvatting wat hier besproken is. Geef ook de actiepunten.
-Er zijn meerdere personen aan het woord geweest maar dat is niet aangegeven in de tekst,
-probeer dat er zelf uit te halen. Geef het weer in de volgende vorm, waarbij je <blabla> vervangt door
-de juiste informatie. Zet deelnemers in alfabetische volgorde, actiepunten in volgorde van hoe ze aan bod kwamen in
-de tekst. Soms wordt er over personen gesproken maar zijn ze niet aanwezig in de meeting,
-zet ze dan ook niet bij de deelnemers.
+            # Find all recording_* directories
+            recording_dirs = sorted(
+                [d for d in self.recordings_dir.iterdir() if d.is_dir() and d.name.startswith('recording_')],
+                key=lambda d: d.name,
+                reverse=True  # Most recent first
+            )
 
---- Deelnemers ---
-- <persoon 1> - <Mening van die persoon in 1 zin>
-- <persoon 2> - <Mening van die persoon in 1 zin>
-- etc...
+            # Load each recording's JSON file
+            for rec_dir in recording_dirs:
+                json_file = rec_dir / f"{rec_dir.name}.json"
 
---- Samenvatting ---
-<korte samenvatting in 3 zinnen>
+                if json_file.exists():
+                    try:
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            recording = json.load(f)
+                            self.recordings.append(recording)
+                    except Exception as e:
+                        print(f"Error loading recording from {json_file}: {e}")
 
---- Actiepunten ---
-- <actiepunt 1> -- <verantwoordelijke persoon>
-- <actiepunt 2> -- <verantwoordelijke persoon>
-- etc...
-
-Hier volgt de tekst:"""
-
-                for rec in self.recordings:
-                    changed = False
-
-                    # Add missing summary_prompt
-                    if 'summary_prompt' not in rec:
-                        rec['summary_prompt'] = default_prompt
-                        changed = True
-
-                    # Add missing AI provider settings
-                    if 'ai_provider' not in rec:
-                        rec['ai_provider'] = 'azure'
-                        changed = True
-
-                    if 'segment_duration' not in rec:
-                        rec['segment_duration'] = 30
-                        changed = True
-
-                    if 'overlap_duration' not in rec:
-                        rec['overlap_duration'] = 15
-                        changed = True
-
-                    if 'ollama_url' not in rec:
-                        rec['ollama_url'] = 'http://localhost:11434/v1'
-                        changed = True
-
-                    if 'ollama_model' not in rec:
-                        rec['ollama_model'] = ''
-                        changed = True
-
-                    if changed:
-                        needs_save = True
-
-                # Save if we migrated any recordings
-                if needs_save:
-                    print(f"DEBUG: Migrated {sum(1 for rec in self.recordings if 'summary_prompt' in rec)} recordings with missing fields")
-                    self.save_recordings()
+            print(f"DEBUG: Loaded {len(self.recordings)} recordings from subfolders")
 
         except Exception as e:
             print(f"Error loading recordings: {e}")
             self.recordings = []
 
-    def save_recordings(self):
-        """Save recordings to JSON file"""
+    def save_recording(self, recording):
+        """Save a single recording to its JSON file"""
         try:
-            Path("recordings").mkdir(exist_ok=True)
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.recordings, f, indent=2, ensure_ascii=False)
+            timestamp = recording['id']
+            rec_dir = self.recordings_dir / f"recording_{timestamp}"
+            rec_dir.mkdir(parents=True, exist_ok=True)
+
+            json_file = rec_dir / f"recording_{timestamp}.json"
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(recording, f, indent=2, ensure_ascii=False)
+
+            print(f"DEBUG: Saved recording to {json_file}")
         except Exception as e:
-            print(f"Error saving recordings: {e}")
+            print(f"Error saving recording: {e}")
 
     def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model="",
                       ai_provider="azure", segment_duration=30, overlap_duration=15,
@@ -119,7 +86,7 @@ Hier volgt de tekst:"""
             "summary_prompt": summary_prompt  # Summary prompt text
         }
         self.recordings.insert(0, recording)  # Add to beginning
-        self.save_recordings()
+        self.save_recording(recording)
         return recording
 
     def get_audio_duration(self, audio_file):
@@ -139,7 +106,7 @@ Hier volgt de tekst:"""
         for rec in self.recordings:
             if rec["id"] == recording_id:
                 rec.update(kwargs)
-                self.save_recordings()
+                self.save_recording(rec)
                 break
 
     def get_recording(self, recording_id):

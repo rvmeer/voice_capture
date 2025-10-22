@@ -202,6 +202,16 @@ Hier volgt de tekst:"""
 
         tray_menu.addSeparator()
 
+        # Add summary model selection submenu
+        self.summary_menu = QMenu("Summary Model", tray_menu)
+        self.summary_action_group = QActionGroup(self.summary_menu)
+        self.summary_action_group.setExclusive(True)
+
+        # Will be populated by refresh_tray_summary_models()
+        tray_menu.addMenu(self.summary_menu)
+
+        tray_menu.addSeparator()
+
         # Add input device selection submenu
         self.input_menu = QMenu("Input Selection", tray_menu)
         self.input_action_group = QActionGroup(self.input_menu)
@@ -230,6 +240,9 @@ Hier volgt de tekst:"""
 
         # Populate input devices in tray menu
         self.refresh_tray_input_devices()
+
+        # Populate summary models in tray menu
+        self.refresh_tray_summary_models()
 
     def on_tray_icon_activated(self, reason):
         """Handle tray icon activation (click)"""
@@ -1242,9 +1255,12 @@ Hier volgt de tekst:"""
                 frames_per_overlap = int(sample_rate * overlap_duration)
                 bytes_per_frame = sample_width * num_channels
 
-                # Create segments directory
-                timestamp = Path(self.current_audio_file).stem.replace("recording_", "")
-                segments_dir = Path(f"recordings/segments_{timestamp}")
+                # Create segments directory inside the recording folder
+                # Extract timestamp from the audio file path
+                audio_path = Path(self.current_audio_file)
+                # The parent directory should be recording_<timestamp>
+                rec_dir = audio_path.parent
+                segments_dir = rec_dir / "segments"
                 segments_dir.mkdir(parents=True, exist_ok=True)
 
                 segment_num = 0
@@ -1858,20 +1874,21 @@ Hier volgt de tekst:"""
                 recording = self.recording_manager.get_recording(recording_id)
 
                 if recording:
-                    # Delete audio file
+                    # Delete entire recording folder
                     audio_file = Path(recording['audio_file'])
-                    if audio_file.exists():
-                        try:
-                            audio_file.unlink()
-                        except Exception as e:
-                            print(f"Error deleting audio file: {e}")
+                    rec_dir = audio_file.parent  # Get the recording_<timestamp> folder
 
-                    # Remove from database
+                    if rec_dir.exists() and rec_dir.is_dir():
+                        try:
+                            import shutil
+                            shutil.rmtree(rec_dir)
+                            print(f"DEBUG: Deleted recording folder: {rec_dir}")
+                        except Exception as e:
+                            print(f"Error deleting recording folder: {e}")
+
+                    # Remove from in-memory list
                     self.recording_manager.recordings.remove(recording)
                     deleted_count += 1
-
-            # Save updated database
-            self.recording_manager.save_recordings()
 
             # Clear current selection if it was deleted
             if self.current_recording_id in [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]:
@@ -2134,6 +2151,105 @@ Hier volgt de tekst:"""
 
         except Exception as e:
             print(f"ERROR: Failed to set tray model: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def refresh_tray_summary_models(self):
+        """Refresh the summary model list in the tray menu"""
+        # Check if tray icon is initialized
+        if not hasattr(self, 'summary_menu'):
+            return
+
+        try:
+            # Clear existing actions
+            self.summary_menu.clear()
+
+            # Get current provider and model
+            current_provider = self.ai_provider
+            current_ollama_model = self.ollama_model
+
+            # Add Azure OpenAI option
+            azure_model_name = os.getenv('AZURE_OPENAI_MODEL', 'gpt-4o')
+            azure_action = self.summary_menu.addAction(f"Azure OpenAI ({azure_model_name})")
+            azure_action.setCheckable(True)
+            azure_action.setData({"provider": "azure", "model": ""})
+            azure_action.triggered.connect(lambda: self.set_tray_summary_model("azure", ""))
+            self.summary_action_group.addAction(azure_action)
+
+            # Check Azure if it's the current provider
+            if current_provider == "azure":
+                azure_action.setChecked(True)
+
+            # Add separator
+            self.summary_menu.addSeparator()
+
+            # Add Ollama models if available
+            if self.ollama_available_models:
+                for model_name in self.ollama_available_models:
+                    action = self.summary_menu.addAction(f"Ollama: {model_name}")
+                    action.setCheckable(True)
+                    action.setData({"provider": "ollama", "model": model_name})
+                    action.triggered.connect(lambda checked, m=model_name: self.set_tray_summary_model("ollama", m))
+                    self.summary_action_group.addAction(action)
+
+                    # Check if this is the current Ollama model
+                    if current_provider == "ollama" and current_ollama_model == model_name:
+                        action.setChecked(True)
+            else:
+                # No Ollama models loaded yet
+                no_models_action = self.summary_menu.addAction("Ollama: (geen modellen geladen)")
+                no_models_action.setEnabled(False)
+
+            print(f"DEBUG: Tray summary menu updated with Azure and {len(self.ollama_available_models)} Ollama models")
+
+        except Exception as e:
+            print(f"ERROR: Failed to refresh tray summary models: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def set_tray_summary_model(self, provider, model_name):
+        """Set the summary model from the tray menu"""
+        try:
+            print(f"DEBUG: Tray menu - changing summary model to: {provider} / {model_name}")
+
+            # Update provider and model
+            self.ai_provider = provider
+            if provider == "ollama":
+                self.ollama_model = model_name
+
+                # Initialize Ollama client
+                try:
+                    self.ollama_client = OpenAI(
+                        base_url=self.ollama_url,
+                        api_key="ollama"
+                    )
+                    print(f"DEBUG: Ollama client initialized")
+                except Exception as e:
+                    print(f"ERROR: Failed to initialize Ollama client: {e}")
+
+            # Update UI in settings tab
+            self.ai_provider_combo.setCurrentText("Azure OpenAI" if provider == "azure" else "Ollama")
+            if provider == "ollama":
+                self.ollama_model_combo.setCurrentText(model_name)
+
+            # Show notification
+            if provider == "azure":
+                azure_model = os.getenv('AZURE_OPENAI_MODEL', 'gpt-4o')
+                display_name = f"Azure OpenAI ({azure_model})"
+            else:
+                display_name = f"Ollama: {model_name}"
+
+            self.tray_icon.showMessage(
+                "Summary Model Gewijzigd",
+                f"Samenvattingen worden gegenereerd met:\n{display_name}",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+
+            print(f"DEBUG: Summary model set to: {display_name}")
+
+        except Exception as e:
+            print(f"ERROR: Failed to set tray summary model: {e}")
             import traceback
             traceback.print_exc()
 

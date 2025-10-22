@@ -113,8 +113,9 @@ class AudioRecorder:
     def save_segment(self, frames, segment_num):
         """Save a 30-second segment to file"""
         try:
-            # Create segments directory
-            segments_dir = Path(f"recordings/segments_{self.recording_timestamp}")
+            # Create segments directory inside recording folder
+            rec_dir = Path(f"recordings/recording_{self.recording_timestamp}")
+            segments_dir = rec_dir / "segments"
             segments_dir.mkdir(parents=True, exist_ok=True)
 
             # Save segment file
@@ -154,14 +155,17 @@ class AudioRecorder:
 
         # Use the recording timestamp from start_recording
         timestamp = self.recording_timestamp if self.recording_timestamp else datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"recordings/recording_{timestamp}.wav"
 
-        # Create recordings directory if it doesn't exist
-        Path("recordings").mkdir(exist_ok=True)
+        # Create recording directory structure
+        rec_dir = Path(f"recordings/recording_{timestamp}")
+        rec_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save the complete recording in the recording folder
+        filename = rec_dir / f"recording_{timestamp}.wav"
 
         # Save the complete recording using all_frames
         try:
-            wf = wave.open(filename, 'wb')
+            wf = wave.open(str(filename), 'wb')
             wf.setnchannels(self.CHANNELS)
             wf.setsampwidth(self.audio.get_sample_size(self.FORMAT))
             wf.setframerate(self.RATE)
@@ -171,7 +175,7 @@ class AudioRecorder:
         except Exception as e:
             print(f"Error saving recording: {e}")
 
-        return filename, timestamp
+        return str(filename), timestamp
 
     def cleanup(self):
         """Clean up audio resources"""
