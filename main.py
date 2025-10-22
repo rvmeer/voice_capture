@@ -38,7 +38,7 @@ from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPainter, QPixmap, QPen,
 
 
 def create_tray_icon(recording=False):
-    """Create a tray icon - open circle when idle, filled red circle when recording"""
+    """Create a tray icon - white open circle when idle, red solid circle when recording"""
     # Create a 22x22 pixmap (standard size for macOS menu bar icons)
     pixmap = QPixmap(22, 22)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -47,13 +47,20 @@ def create_tray_icon(recording=False):
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     if recording:
-        # Filled red circle when recording
+        # White open circle outline
+        pen = QPen(QColor(255, 255, 255))  # White
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(2, 2, 18, 18)
+
+        # Red solid circle inside
         painter.setBrush(QColor(244, 67, 54))  # Red color
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(3, 3, 16, 16)
+        painter.drawEllipse(6, 6, 10, 10)
     else:
-        # Empty circle outline when idle
-        pen = QPen(QColor(100, 100, 100))  # Dark gray
+        # White open circle outline when idle
+        pen = QPen(QColor(255, 255, 255))  # White
         pen.setWidth(2)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
