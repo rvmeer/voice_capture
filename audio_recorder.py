@@ -23,9 +23,9 @@ class AudioRecorder:
         self.audio = pyaudio.PyAudio()
         self.stream = None
 
-        # For 30-second segments with 15-second overlap
-        self.segment_duration = 30  # seconds
-        self.overlap_duration = 15  # seconds
+        # For 10-second segments with 5-second overlap
+        self.segment_duration = 10  # seconds
+        self.overlap_duration = 5  # seconds
         self.segment_callback = None  # Callback function for segment ready
         self.segment_counter = 0
         self.recording_timestamp = None

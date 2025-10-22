@@ -107,8 +107,8 @@ class TranscriptionApp(QMainWindow):
         self.pending_summary_needed = False  # Flag to indicate if a summary is needed after current one completes
 
         # Settings
-        self.segment_duration = 30  # seconds
-        self.overlap_duration = 15  # seconds
+        self.segment_duration = 10  # seconds
+        self.overlap_duration = 5  # seconds
         self.summary_prompt = """Maak een samenvatting wat hier besproken is. Geef ook de actiepunten.
 Er zijn meerdere personen aan het woord geweest maar dat is niet aangegeven in de tekst,
 probeer dat er zelf uit te halen. Geef het weer in de volgende vorm, waarbij je <blabla> vervangt door
@@ -298,19 +298,11 @@ Hier volgt de tekst:"""
                 # Get audio duration
                 duration = self.recording_manager.get_audio_duration(self.current_audio_file)
 
-                # Add to manager with all current settings
-                self.recording_manager.add_recording(
-                    self.current_audio_file,
+                # Update existing recording with final name and duration
+                self.recording_manager.update_recording(
                     self.current_recording_id,
                     name=recording_name,
-                    duration=duration,
-                    model=self.selected_model_name,
-                    ai_provider=self.ai_provider,
-                    segment_duration=self.segment_duration,
-                    overlap_duration=self.overlap_duration,
-                    ollama_url=self.ollama_url,
-                    ollama_model=self.ollama_model,
-                    summary_prompt=self.summary_prompt
+                    duration=duration
                 )
 
                 # Refresh list
@@ -1003,6 +995,31 @@ Hier volgt de tekst:"""
         self.recorder.start_recording(segment_callback=self.on_segment_ready)
         self.timer.start(1000)  # Update every second
 
+        # Get the recording timestamp and create initial JSON file
+        self.current_recording_id = self.recorder.recording_timestamp
+        self.current_audio_file = f"recordings/recording_{self.current_recording_id}/recording_{self.current_recording_id}.wav"
+
+        # Create initial recording entry in database
+        recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        self.recording_manager.add_recording(
+            self.current_audio_file,
+            self.current_recording_id,
+            name=recording_name,
+            duration=0,  # Will be updated when recording stops
+            model=self.selected_model_name,
+            ai_provider=self.ai_provider,
+            segment_duration=self.segment_duration,
+            overlap_duration=self.overlap_duration,
+            ollama_url=self.ollama_url,
+            ollama_model=self.ollama_model,
+            summary_prompt=self.summary_prompt
+        )
+
+        # Refresh list to show the new recording
+        self.refresh_recording_list()
+
+        print(f"DEBUG: Created initial JSON for recording {self.current_recording_id}")
+
     def stop_recording(self):
         """Stop audio recording and process"""
         self.is_recording = False
@@ -1059,19 +1076,11 @@ Hier volgt de tekst:"""
         # Get audio duration
         duration = self.recording_manager.get_audio_duration(self.current_audio_file)
 
-        # Add to manager with all current settings
-        self.recording_manager.add_recording(
-            self.current_audio_file,
+        # Update existing recording with final name and duration
+        self.recording_manager.update_recording(
             self.current_recording_id,
             name=recording_name,
-            duration=duration,
-            model=self.selected_model_name,
-            ai_provider=self.ai_provider,
-            segment_duration=self.segment_duration,
-            overlap_duration=self.overlap_duration,
-            ollama_url=self.ollama_url,
-            ollama_model=self.ollama_model,
-            summary_prompt=self.summary_prompt
+            duration=duration
         )
 
         # Refresh list
@@ -1194,6 +1203,28 @@ Hier volgt de tekst:"""
         # Update UI with concatenated text
         full_text = " ".join(self.transcribed_segments)
         self.transcription_text.setPlainText(full_text)
+
+        # Write incremental transcription to file (both TXT and update JSON)
+        if self.current_recording_id and full_text.strip():
+            try:
+                rec_dir = Path(f"recordings/recording_{self.current_recording_id}")
+                transcription_file = rec_dir / f"transcription_{self.current_recording_id}.txt"
+
+                # Write TXT file
+                with open(transcription_file, 'w', encoding='utf-8') as f:
+                    f.write(full_text)
+
+                print(f"DEBUG: Updated transcription file: {transcription_file}")
+
+                # Update JSON file with current transcription
+                self.recording_manager.update_recording(
+                    self.current_recording_id,
+                    transcription=full_text
+                )
+
+                print(f"DEBUG: Updated JSON with incremental transcription")
+            except Exception as e:
+                print(f"ERROR: Failed to write transcription file: {e}")
 
         print(f"DEBUG: Updated transcription display ({len(self.transcribed_segments)} segments)")
 
