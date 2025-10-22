@@ -86,3 +86,12 @@ whisper_demo/
 ## Licentie
 
 MIT License
+
+### Instellingen macbook
+
+Aggregate device op macbook mic en blackhole
+Multi output device op minstens blackhole
+
+Nu stel je bij de macbook (option click) in:
+  output -> Multi output device
+  input -> Aggregate device

@@ -684,6 +684,16 @@ Hier volgt de tekst:"""
         refresh_ollama_btn.clicked.connect(self.refresh_ollama_models)
         form_layout.addRow("", refresh_ollama_btn)
 
+        # Audio Input Device selection
+        self.audio_device_combo = QComboBox()
+        self.audio_device_combo.setStyleSheet("QComboBox { padding: 8px; font-size: 13px; }")
+        form_layout.addRow("Audio Invoerapparaat:", self.audio_device_combo)
+
+        # Refresh audio devices button
+        refresh_audio_btn = QPushButton("🔄 Audio Apparaten Ophalen")
+        refresh_audio_btn.clicked.connect(self.refresh_audio_devices)
+        form_layout.addRow("", refresh_audio_btn)
+
         settings_layout.addWidget(settings_form)
 
         # Update visibility based on initial provider
@@ -736,6 +746,9 @@ Hier volgt de tekst:"""
         # Timer for recording duration
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
+
+        # Load audio devices after status bar is created
+        self.refresh_audio_devices()
 
     def on_model_changed(self, model_name):
         """Handle model selection change"""
@@ -1895,6 +1908,35 @@ Hier volgt de tekst:"""
                 f"Fout bij ophalen van Ollama modellen:\n\n{str(e)}"
             )
 
+    def refresh_audio_devices(self):
+        """Refresh the list of available audio input devices"""
+        try:
+            self.status_bar.showMessage("Audio apparaten ophalen...")
+
+            # Get devices from the recorder
+            devices = self.recorder.get_audio_devices()
+
+            # Clear and populate the combo box
+            self.audio_device_combo.clear()
+
+            # Add default device option
+            self.audio_device_combo.addItem("Standaard (Systeem Default)", None)
+
+            # Add all available input devices
+            for device in devices:
+                device_name = device['name']
+                device_index = device['index']
+                self.audio_device_combo.addItem(device_name, device_index)
+
+            self.status_bar.showMessage(f"{len(devices)} audio apparaten gevonden")
+            print(f"DEBUG: Found {len(devices)} audio input devices")
+
+        except Exception as e:
+            self.status_bar.showMessage(f"Fout bij ophalen audio apparaten: {str(e)}")
+            print(f"ERROR: Failed to refresh audio devices: {e}")
+            import traceback
+            traceback.print_exc()
+
     def apply_settings(self):
         """Apply settings from the Settings tab"""
         # Get values from UI
@@ -1959,9 +2001,15 @@ Hier volgt de tekst:"""
                 )
                 return
 
+        # Get audio device settings
+        selected_device_index = self.audio_device_combo.currentData()
+
         # Update AudioRecorder settings
         self.recorder.segment_duration = segment_duration
         self.recorder.overlap_duration = overlap_duration
+        self.recorder.set_input_device(selected_device_index)
+
+        print(f"DEBUG: Audio device set to index: {selected_device_index}")
 
         # Save settings to currently selected recording if one is loaded
         if self.current_recording_id:

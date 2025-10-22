@@ -31,6 +31,33 @@ class AudioRecorder:
         self.recording_timestamp = None
         self.all_frames = []  # Keep all frames for complete recording
 
+        # Audio input device selection
+        self.input_device_index = None  # None = default device
+
+    def get_audio_devices(self):
+        """Get list of available audio input devices"""
+        devices = []
+        info = self.audio.get_host_api_info_by_index(0)
+        num_devices = info.get('deviceCount')
+
+        for i in range(num_devices):
+            device_info = self.audio.get_device_info_by_host_api_device_index(0, i)
+            # Only include input devices (max_input_channels > 0)
+            if device_info.get('maxInputChannels') > 0:
+                devices.append({
+                    'index': i,
+                    'name': device_info.get('name'),
+                    'max_input_channels': device_info.get('maxInputChannels'),
+                    'default_sample_rate': device_info.get('defaultSampleRate')
+                })
+
+        return devices
+
+    def set_input_device(self, device_index):
+        """Set the input device for recording"""
+        self.input_device_index = device_index
+        print(f"DEBUG: Input device set to index {device_index}")
+
     def start_recording(self, segment_callback=None):
         """Start recording audio from microphone"""
         self.frames = []
@@ -40,13 +67,21 @@ class AudioRecorder:
         self.segment_counter = 0
         self.recording_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        self.stream = self.audio.open(
-            format=self.FORMAT,
-            channels=self.CHANNELS,
-            rate=self.RATE,
-            input=True,
-            frames_per_buffer=self.CHUNK
-        )
+        # Open stream with selected input device
+        stream_params = {
+            'format': self.FORMAT,
+            'channels': self.CHANNELS,
+            'rate': self.RATE,
+            'input': True,
+            'frames_per_buffer': self.CHUNK
+        }
+
+        # Add input_device_index if one is selected
+        if self.input_device_index is not None:
+            stream_params['input_device_index'] = self.input_device_index
+            print(f"DEBUG: Opening stream with device index {self.input_device_index}")
+
+        self.stream = self.audio.open(**stream_params)
 
         def record():
             frames_per_segment = int(self.RATE * self.segment_duration / self.CHUNK)
