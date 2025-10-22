@@ -8,7 +8,6 @@ import sys
 import os
 import wave
 import threading
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -89,7 +88,6 @@ class TranscriptionApp(QMainWindow):
         self.recording_time = 0
         self.current_audio_file = None
         self.current_recording_id = None
-        self.playback_process = None
 
         # Connect signals to slots
         self.transcription_complete.connect(self.on_transcription_complete)
@@ -425,11 +423,6 @@ class TranscriptionApp(QMainWindow):
         # List action buttons - Row 1
         list_btn_layout1 = QHBoxLayout()
         list_btn_layout1.setSpacing(10)
-
-        self.play_btn = QPushButton("▶ Afspelen")
-        self.play_btn.clicked.connect(self.play_recording)
-        self.play_btn.setEnabled(False)
-        list_btn_layout1.addWidget(self.play_btn)
 
         self.rename_btn = QPushButton("✏️ Hernoemen")
         self.rename_btn.clicked.connect(self.rename_recording)
@@ -1467,12 +1460,10 @@ class TranscriptionApp(QMainWindow):
         num_selected = len(selected_items)
 
         if num_selected == 0:
-            self.play_btn.setEnabled(False)
             self.rename_btn.setEnabled(False)
             self.retranscribe_btn.setEnabled(False)
             self.delete_btn.setEnabled(False)
         elif num_selected == 1:
-            self.play_btn.setEnabled(True)
             self.rename_btn.setEnabled(True)
             self.retranscribe_btn.setEnabled(True)
 
@@ -1482,7 +1473,6 @@ class TranscriptionApp(QMainWindow):
             has_transcription = bool(recording and recording.get('transcription', '').strip())
             self.delete_btn.setEnabled(True)
         else:  # Multiple selections
-            self.play_btn.setEnabled(False)
             self.rename_btn.setEnabled(False)
             self.retranscribe_btn.setEnabled(False)
             self.delete_btn.setEnabled(True)
@@ -1530,59 +1520,6 @@ class TranscriptionApp(QMainWindow):
 
             self.status_label.setText(f"Geladen: {recording['name']}")
             self.status_bar.showMessage(f"Opname en instellingen geladen: {recording['date']}")
-
-    def play_recording(self):
-        """Play the selected recording using system audio player"""
-        if self.current_audio_file and Path(self.current_audio_file).exists():
-            try:
-                # Stop any existing playback
-                if self.playback_process and self.playback_process.poll() is None:
-                    self.playback_process.terminate()
-
-                # Use macOS afplay command for audio playback
-                audio_path = str(Path(self.current_audio_file).absolute())
-                self.playback_process = subprocess.Popen(
-                    ['afplay', audio_path],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                self.status_bar.showMessage("Audio afspelen...")
-
-                # Update button text
-                self.play_btn.setText("⏹ Stoppen")
-                self.play_btn.clicked.disconnect()
-                self.play_btn.clicked.connect(self.stop_playback)
-
-                # Monitor playback completion
-                def check_playback():
-                    if self.playback_process and self.playback_process.poll() is not None:
-                        self.reset_play_button()
-                    else:
-                        QTimer.singleShot(500, check_playback)
-
-                QTimer.singleShot(500, check_playback)
-
-            except Exception as e:
-                QMessageBox.warning(self, "Fout", f"Kan audio niet afspelen: {str(e)}")
-        else:
-            QMessageBox.warning(self, "Fout", "Audio bestand niet gevonden")
-
-    def stop_playback(self):
-        """Stop audio playback"""
-        if self.playback_process and self.playback_process.poll() is None:
-            self.playback_process.terminate()
-            self.playback_process.wait()
-        self.reset_play_button()
-        self.status_bar.showMessage("Afspelen gestopt")
-
-    def reset_play_button(self):
-        """Reset play button to default state"""
-        try:
-            self.play_btn.clicked.disconnect()
-        except:
-            pass
-        self.play_btn.setText("▶ Afspelen")
-        self.play_btn.clicked.connect(self.play_recording)
 
     def rename_recording(self):
         """Rename the selected recording"""
@@ -1993,14 +1930,6 @@ class TranscriptionApp(QMainWindow):
             self.recorder.cleanup()
         except Exception as e:
             print(f"Error cleaning up recorder: {e}")
-
-        # Stop any playback
-        try:
-            if self.playback_process and self.playback_process.poll() is None:
-                self.playback_process.terminate()
-                self.playback_process.wait()
-        except Exception as e:
-            print(f"Error stopping playback: {e}")
 
         print("DEBUG: Cleanup complete")
 
