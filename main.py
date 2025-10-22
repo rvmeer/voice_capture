@@ -18,6 +18,7 @@ import numpy as np
 from openai import AzureOpenAI, OpenAI
 import requests
 import uvicorn
+import torch
 
 # Load environment variables
 load_dotenv()
@@ -1048,12 +1049,31 @@ class TranscriptionApp(QMainWindow):
         def worker():
             try:
                 print(f"DEBUG: Transcribing segment {segment_num}: {segment_file}")
-                result = model.transcribe(
-                    segment_file,
-                    language="nl",
-                    task="transcribe",
-                    fp16=False
-                )
+
+                # Use torch.no_grad() to prevent gradient computation and cache issues
+                with torch.no_grad():
+                    # Clear model decoder state to prevent KeyError in kv_cache
+                    # This is crucial when transcribing multiple segments with the same model instance
+                    # The KV cache can get corrupted between different transcribe() calls
+                    try:
+                        # Clear decoder cache if it exists
+                        if hasattr(model, 'decoder'):
+                            # Reset all blocks' kv_cache
+                            for block in model.decoder.blocks:
+                                if hasattr(block, 'attn') and hasattr(block.attn, 'kv_cache'):
+                                    block.attn.kv_cache.clear()
+                                if hasattr(block, 'cross_attn') and hasattr(block.cross_attn, 'kv_cache'):
+                                    block.cross_attn.kv_cache.clear()
+                    except Exception as cache_error:
+                        print(f"DEBUG: Could not clear cache (non-critical): {cache_error}")
+
+                    result = model.transcribe(
+                        segment_file,
+                        language="nl",
+                        task="transcribe",
+                        fp16=False,
+                        verbose=False  # Suppress whisper output
+                    )
 
                 segment_text = result.get('text', '').strip()
                 print(f"DEBUG: Segment {segment_num} transcribed: {segment_text[:50]}...")
@@ -1065,6 +1085,8 @@ class TranscriptionApp(QMainWindow):
                 print(f"ERROR transcribing segment {segment_num}: {e}")
                 import traceback
                 traceback.print_exc()
+                # Mark as not transcribing so we can continue with other segments
+                self.is_transcribing_segment = False
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
