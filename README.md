@@ -80,15 +80,39 @@ whisper_demo/
 └── README.md                 # Deze file
 ```
 
+## API Toegang
+
+De applicatie start automatisch een OpenAPI server voor programmatische toegang tot opnames:
+
+### Beschikbare Endpoints:
+- `GET /recordings` - Lijst van alle opnames
+- `GET /recordings/{id}` - Specifieke opname details
+- `GET /recordings/{id}/transcription` - Transcriptie tekst
+- `PUT /recordings/{id}/title` - Update opname titel
+
+### Documentatie:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+- OpenAPI Schema: http://localhost:8000/openapi.json
+
+### Gebruik met Open-WebUI:
+Configureer in Open-WebUI Settings → Tools met URL: `http://localhost:8000/openapi.json`
+
+Zie [OPENAPI_README.md](OPENAPI_README.md) voor meer details.
+
+### MCP Server:
+Voor gebruik met Claude Desktop, zie [MCP_README.md](MCP_README.md).
+
 ## Technische Details
 
-- **GUI Framework**: PyQt6
+- **GUI Framework**: PyQt6 (tray-only mode)
+- **API Server**: FastAPI + Uvicorn (automatisch gestart)
 - **Audio Opname**: PyAudio (16kHz, mono)
 - **Audio Playback**: macOS afplay (system command)
-- **Transcriptie**: OpenAI Whisper (tiny model voor snelheid)
+- **Transcriptie**: OpenAI Whisper (tiny/small/medium/large models)
 - **Taal**: Nederlands (configureerbaar)
 - **Threading**: Asynchrone verwerking voor soepele UX
-- **Opslag**: JSON voor metadata, WAV voor audio
+- **Opslag**: JSON voor metadata (ISO 8601 duration), WAV voor audio
 
 ## Licentie
 
