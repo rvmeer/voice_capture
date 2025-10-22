@@ -8,3 +8,4 @@ pyannote.audio
 fastapi
 uvicorn[standard]
 pydantic
+mcp

@@ -6,25 +6,33 @@ Deze MCP (Model Context Protocol) server geeft toegang tot je opnames, metadata 
 
 ## Installatie
 
-Installeer eerst de benodigde MCP library:
+De MCP library is al opgenomen in `requirements.txt`. Als je de applicatie hebt geïnstalleerd, is MCP al beschikbaar.
+
+Als je MCP separaat wilt installeren:
 
 ```bash
+# Activeer eerst je virtual environment
+source env/bin/activate  # macOS/Linux
+env\Scripts\activate     # Windows
+
+# Installeer MCP
 pip install mcp
 ```
 
 ## Server Starten
 
-Start de MCP server met:
+De MCP server wordt normaal gesproken automatisch gestart door Claude Desktop via de configuratie. Je kunt hem ook handmatig starten voor testing:
 
 ```bash
+# Activeer je virtual environment
+source env/bin/activate  # macOS/Linux
+env\Scripts\activate     # Windows
+
+# Start de MCP server
 python mcp_server.py
 ```
 
-Of als executable:
-
-```bash
-./mcp_server.py
-```
+**Let op**: De server verwacht stdio communicatie en zal geen output tonen tenzij er data via stdin komt.
 
 ## Beschikbare Tools
 
@@ -136,7 +144,7 @@ Bestand: `~/Library/Application Support/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "voice-capture": {
-      "command": "python",
+      "command": "/absolute/path/to/voice_capture/env/bin/python",
       "args": ["/absolute/path/to/voice_capture/mcp_server.py"]
     }
   }
@@ -150,7 +158,7 @@ Bestand: `%APPDATA%\Claude\claude_desktop_config.json`
 {
   "mcpServers": {
     "voice-capture": {
-      "command": "python",
+      "command": "C:\\absolute\\path\\to\\voice_capture\\env\\Scripts\\python.exe",
       "args": ["C:\\absolute\\path\\to\\voice_capture\\mcp_server.py"]
     }
   }
@@ -164,7 +172,7 @@ Bestand: `~/.config/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "voice-capture": {
-      "command": "python3",
+      "command": "/absolute/path/to/voice_capture/env/bin/python",
       "args": ["/absolute/path/to/voice_capture/mcp_server.py"]
     }
   }
@@ -172,10 +180,19 @@ Bestand: `~/.config/Claude/claude_desktop_config.json`
 ```
 
 **Belangrijk**:
-- Vervang het pad door de absolute locatie van je `mcp_server.py` bestand
+- Vervang `/absolute/path/to/voice_capture` door het volledige pad naar je project directory
+- Gebruik het Python executable **uit het virtual environment** (`env/bin/python` of `env\Scripts\python.exe`)
 - Op Windows gebruik je backslashes (`\`) of forward slashes met dubbele escaping (`\\`)
-- Op Linux gebruik mogelijk `python3` in plaats van `python`
 - Herstart Claude Desktop na het wijzigen van de configuratie
+
+**Tip**: Om je absolute pad te vinden:
+```bash
+# macOS/Linux
+pwd
+
+# Windows (in PowerShell)
+pwd
+```
 
 ## Foutafhandeling
 
@@ -199,7 +216,8 @@ Alle tools geven een error response als er iets misgaat:
 
 ## Vereisten
 
-- Python 3.8+
-- `mcp` library (`pip install mcp`)
-- Draaiende Audio Transcriptie Applicatie (voor nieuwe opnames)
+- Python 3.8+ met virtual environment
+- `mcp` library (automatisch geïnstalleerd via `requirements.txt`)
+- Audio Transcriptie Applicatie geïnstalleerd
 - Toegang tot de `recordings/` directory
+- Claude Desktop (voor integratie met Claude)
