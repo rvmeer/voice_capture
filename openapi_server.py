@@ -33,11 +33,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Path to recordings directory
-RECORDINGS_DIR = Path(__file__).parent / "recordings"
+# Path to recordings directory - use Documents/VoiceCapture
+RECORDINGS_DIR = Path.home() / "Documents" / "VoiceCapture"
 
-# Initialize recording manager
-recording_manager = RecordingManager()
+# Initialize recording manager with same directory
+recording_manager = RecordingManager(recordings_dir=str(RECORDINGS_DIR))
 
 
 # Pydantic models for requests/responses

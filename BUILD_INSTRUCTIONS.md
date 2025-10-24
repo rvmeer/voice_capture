@@ -4,6 +4,26 @@
 
 VoiceCapture is een audio transcriptie applicatie die gebruik maakt van OpenAI's Whisper model om audio opnames te transcriberen naar tekst. De applicatie draait als een system tray icoon op macOS.
 
+### Opslag Locatie
+
+Alle opnames worden opgeslagen in:
+```
+~/Documents/VoiceCapture/
+```
+
+Elke opname wordt opgeslagen in een eigen folder met de volgende structuur:
+```
+~/Documents/VoiceCapture/
+├── recording_20251024_120000/
+│   ├── recording_20251024_120000.wav    # Volledige audio opname
+│   ├── recording_20251024_120000.json   # Metadata en transcriptie
+│   ├── transcription_20251024_120000.txt # Transcriptie tekst
+│   └── segments/                        # Audio segmenten (voor incrementele transcriptie)
+│       ├── segment_000.wav
+│       ├── segment_001.wav
+│       └── ...
+```
+
 ## Vereisten
 
 - macOS 10.13 of hoger

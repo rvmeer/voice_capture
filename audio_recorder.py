@@ -8,6 +8,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 import pyaudio
+import os
 
 
 class AudioRecorder:
@@ -33,6 +34,11 @@ class AudioRecorder:
 
         # Audio input device selection
         self.input_device_index = None  # None = default device
+
+        # Set base directory for recordings - use Documents folder
+        self.base_recordings_dir = Path.home() / "Documents" / "VoiceCapture"
+        self.base_recordings_dir.mkdir(parents=True, exist_ok=True)
+        print(f"DEBUG: Recordings will be saved to: {self.base_recordings_dir}")
 
     def get_audio_devices(self):
         """Get list of available audio input devices"""
@@ -114,7 +120,7 @@ class AudioRecorder:
         """Save a 30-second segment to file"""
         try:
             # Create segments directory inside recording folder
-            rec_dir = Path(f"recordings/recording_{self.recording_timestamp}")
+            rec_dir = self.base_recordings_dir / f"recording_{self.recording_timestamp}"
             segments_dir = rec_dir / "segments"
             segments_dir.mkdir(parents=True, exist_ok=True)
 
@@ -157,7 +163,7 @@ class AudioRecorder:
         timestamp = self.recording_timestamp if self.recording_timestamp else datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # Create recording directory structure
-        rec_dir = Path(f"recordings/recording_{timestamp}")
+        rec_dir = self.base_recordings_dir / f"recording_{timestamp}"
         rec_dir.mkdir(parents=True, exist_ok=True)
 
         # Save the complete recording in the recording folder

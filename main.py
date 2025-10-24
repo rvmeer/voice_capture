@@ -80,6 +80,9 @@ class TranscriptionApp(QMainWindow):
         self.recorder = AudioRecorder()
         self.recording_manager = RecordingManager()
 
+        # Get base recordings directory from recorder
+        self.base_recordings_dir = self.recorder.base_recordings_dir
+
         # Model caching: store loaded models
         self.loaded_models = {}  # {model_name: model_object}
         self.selected_model_name = "medium"  # Default selected model
@@ -900,7 +903,7 @@ class TranscriptionApp(QMainWindow):
 
         # Get the recording timestamp and create initial JSON file
         self.current_recording_id = self.recorder.recording_timestamp
-        self.current_audio_file = f"recordings/recording_{self.current_recording_id}/recording_{self.current_recording_id}.wav"
+        self.current_audio_file = str(self.base_recordings_dir / f"recording_{self.current_recording_id}" / f"recording_{self.current_recording_id}.wav")
 
         # Create initial recording entry in database
         recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -1139,7 +1142,7 @@ class TranscriptionApp(QMainWindow):
         # Write incremental transcription to file (both TXT and update JSON)
         if self.current_recording_id and full_text.strip():
             try:
-                rec_dir = Path(f"recordings/recording_{self.current_recording_id}")
+                rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
                 transcription_file = rec_dir / f"transcription_{self.current_recording_id}.txt"
 
                 # Write TXT file
@@ -1187,7 +1190,7 @@ class TranscriptionApp(QMainWindow):
                 print(f"DEBUG: Transcription is empty, deleting recording folder")
                 # Delete the entire recording folder
                 import shutil
-                rec_dir = Path(f"recordings/recording_{self.current_recording_id}")
+                rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
                 if rec_dir.exists() and rec_dir.is_dir():
                     try:
                         shutil.rmtree(rec_dir)
@@ -1399,7 +1402,7 @@ class TranscriptionApp(QMainWindow):
                 print(f"DEBUG: Transcription is empty, deleting recording folder")
                 # Delete the entire recording folder
                 import shutil
-                rec_dir = Path(f"recordings/recording_{self.current_recording_id}")
+                rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
                 if rec_dir.exists() and rec_dir.is_dir():
                     try:
                         shutil.rmtree(rec_dir)

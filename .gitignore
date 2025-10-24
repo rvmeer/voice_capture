@@ -6,3 +6,4 @@ __pycache__/
 recordings_old/
 build/
 dist/
+.DS_Store

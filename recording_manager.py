@@ -60,8 +60,13 @@ def iso_duration_to_seconds(iso_duration):
 class RecordingManager:
     """Manages recording metadata and storage"""
 
-    def __init__(self, recordings_dir="recordings"):
-        self.recordings_dir = Path(recordings_dir)
+    def __init__(self, recordings_dir=None):
+        # Use Documents/VoiceCapture if no directory specified
+        if recordings_dir is None:
+            self.recordings_dir = Path.home() / "Documents" / "VoiceCapture"
+        else:
+            self.recordings_dir = Path(recordings_dir)
+
         self.recordings = []
         self.load_recordings()
 
