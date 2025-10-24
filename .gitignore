@@ -4,3 +4,5 @@ env/
 env312/
 __pycache__/
 recordings_old/
+build/
+dist/
