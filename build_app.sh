@@ -31,7 +31,7 @@ echo ""
 
 # Build the app
 echo "🔨 Building app with PyInstaller..."
-pyinstaller voice_capture.spec --clean
+pyinstaller voice_capture.spec --clean --noconfirm
 echo ""
 
 # Check if build was successful
