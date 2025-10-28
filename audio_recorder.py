@@ -9,6 +9,10 @@ from datetime import datetime
 from pathlib import Path
 import pyaudio
 import os
+from logging_config import get_logger
+
+# Setup logging
+logger = get_logger(__name__)
 
 
 class AudioRecorder:
@@ -38,7 +42,7 @@ class AudioRecorder:
         # Set base directory for recordings - use Documents folder
         self.base_recordings_dir = Path.home() / "Documents" / "VoiceCapture"
         self.base_recordings_dir.mkdir(parents=True, exist_ok=True)
-        print(f"DEBUG: Recordings will be saved to: {self.base_recordings_dir}")
+        logger.info(f"Recordings will be saved to: {self.base_recordings_dir}")
 
     def get_audio_devices(self):
         """Get list of available audio input devices"""
@@ -62,7 +66,7 @@ class AudioRecorder:
     def set_input_device(self, device_index):
         """Set the input device for recording"""
         self.input_device_index = device_index
-        print(f"DEBUG: Input device set to index {device_index}")
+        logger.debug(f"Input device set to index {device_index}")
 
     def start_recording(self, segment_callback=None):
         """Start recording audio from microphone"""
@@ -85,7 +89,7 @@ class AudioRecorder:
         # Add input_device_index if one is selected
         if self.input_device_index is not None:
             stream_params['input_device_index'] = self.input_device_index
-            print(f"DEBUG: Opening stream with device index {self.input_device_index}")
+            logger.debug(f"Opening stream with device index {self.input_device_index}")
 
         self.stream = self.audio.open(**stream_params)
 
@@ -110,7 +114,7 @@ class AudioRecorder:
                         self.segment_counter += 1
 
                 except Exception as e:
-                    print(f"Recording error: {e}")
+                    logger.error(f"Recording error: {e}", exc_info=True)
                     break
 
         self.record_thread = threading.Thread(target=record, daemon=True)
@@ -133,14 +137,14 @@ class AudioRecorder:
             wf.writeframes(b''.join(frames))
             wf.close()
 
-            print(f"DEBUG: Saved segment {segment_num} to {segment_filename}")
+            logger.debug(f"Saved segment {segment_num} to {segment_filename}")
 
             # Call callback if provided
             if self.segment_callback:
                 self.segment_callback(str(segment_filename), segment_num)
 
         except Exception as e:
-            print(f"Error saving segment: {e}")
+            logger.error(f"Error saving segment: {e}", exc_info=True)
 
     def stop_recording(self):
         """Stop recording and return the audio file path"""
@@ -157,7 +161,7 @@ class AudioRecorder:
                 self.stream.close()
                 self.stream = None
         except Exception as e:
-            print(f"Error closing stream: {e}")
+            logger.error(f"Error closing stream: {e}", exc_info=True)
 
         # Use the recording timestamp from start_recording
         timestamp = self.recording_timestamp if self.recording_timestamp else datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -177,9 +181,9 @@ class AudioRecorder:
             wf.setframerate(self.RATE)
             wf.writeframes(b''.join(self.all_frames))  # Use all_frames for complete recording
             wf.close()
-            print(f"DEBUG: Saved complete recording with {len(self.all_frames)} frames to {filename}")
+            logger.info(f"Saved complete recording with {len(self.all_frames)} frames to {filename}")
         except Exception as e:
-            print(f"Error saving recording: {e}")
+            logger.error(f"Error saving recording: {e}", exc_info=True)
 
         return str(filename), timestamp
 

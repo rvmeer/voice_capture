@@ -15,6 +15,11 @@ from mcp.types import Tool, TextContent
 
 # Import recording manager for title updates
 from recording_manager import RecordingManager
+from logging_config import setup_logging, get_logger
+
+# Setup logging - DISABLE console output for MCP (uses stdio for JSON-RPC)
+setup_logging(enable_console=False)
+logger = get_logger(__name__)
 
 # Initialize MCP server
 server = Server("whisper-recordings-server")
@@ -51,10 +56,10 @@ def load_recordings() -> list[dict]:
                         recording = json.load(f)
                         recordings.append(recording)
                 except Exception as e:
-                    print(f"Error loading recording from {json_file}: {e}")
+                    logger.error(f"Error loading recording from {json_file}: {e}", exc_info=True)
 
     except Exception as e:
-        print(f"Error loading recordings: {e}")
+        logger.error(f"Error loading recordings: {e}", exc_info=True)
 
     return recordings
 
@@ -78,7 +83,7 @@ def get_transcription_text(recording_id: str) -> str | None:
             with open(transcription_file, 'r', encoding='utf-8') as f:
                 return f.read()
         except Exception as e:
-            print(f"Error reading transcription file: {e}")
+            logger.error(f"Error reading transcription file: {e}", exc_info=True)
             return None
 
     # Fallback to JSON if TXT doesn't exist

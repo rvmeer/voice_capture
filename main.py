@@ -21,6 +21,10 @@ import torch
 # Import custom modules
 from audio_recorder import AudioRecorder
 from recording_manager import RecordingManager, iso_duration_to_seconds, seconds_to_iso_duration
+from logging_config import setup_logging, get_logger
+
+# Setup logging
+logger = get_logger(__name__)
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -309,9 +313,7 @@ class TranscriptionApp(QMainWindow):
                 self.transcribe_audio()
 
             except Exception as e:
-                print(f"Error in tray save_and_transcribe: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error in tray save_and_transcribe: {e}", exc_info=True)
 
         # Delay the save operation to let audio thread cleanup
         QTimer.singleShot(100, save_and_transcribe)
@@ -708,7 +710,7 @@ class TranscriptionApp(QMainWindow):
         if model_name == self.selected_model_name:
             return  # No change
 
-        print(f"DEBUG: Model selection changed to: {model_name}")
+        logger.debug(f"Model selection changed to: {model_name}")
         self.selected_model_name = model_name
 
         # Update tray menu checkmarks if tray icon exists
@@ -761,22 +763,20 @@ class TranscriptionApp(QMainWindow):
 
         def load_model():
             try:
-                print(f"DEBUG: Starting to load Whisper {model_name} model...")
+                logger.info(f"Starting to load Whisper {model_name} model...")
                 # Load model for CPU transcription
                 model = whisper.load_model(model_name, device="cpu")
-                print(f"DEBUG: Whisper {model_name} model loaded successfully!")
+                logger.info(f"Whisper {model_name} model loaded successfully!")
 
                 # Cache the model
                 self.loaded_models[model_name] = model
-                print(f"DEBUG: Model cached, emitting signal...")
+                logger.debug(f"Model cached, emitting signal...")
 
                 # Emit signal to handle in main thread
                 self.model_loaded.emit(model_name, model)
 
             except Exception as e:
-                print(f"DEBUG: Error loading model: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error loading model: {e}", exc_info=True)
                 self.model_loaded.emit(model_name, None)
 
         thread = threading.Thread(target=load_model, daemon=True)
@@ -786,19 +786,19 @@ class TranscriptionApp(QMainWindow):
         """Get model from cache or load it (lazy loading with caching)"""
         # Check if model is already cached
         if model_name in self.loaded_models:
-            print(f"DEBUG: Using cached {model_name} model")
+            logger.debug(f"Using cached {model_name} model")
             # Immediately proceed with transcription
             self.start_transcription_with_model(self.loaded_models[model_name])
             return
 
         # Model not cached, need to load it
-        print(f"DEBUG: Loading {model_name} model for first time...")
+        logger.info(f"Loading {model_name} model for first time...")
         self.pending_transcription = True
         self.load_model_async(model_name)
 
     def on_model_loaded(self, model_name, model):
         """Handle model loaded signal (main thread)"""
-        print(f"DEBUG: on_model_loaded called for {model_name}, model: {model is not None}")
+        logger.debug(f"on_model_loaded called for {model_name}, model: {model is not None}")
 
         if model:
             if hasattr(self, 'status_label'):
@@ -817,7 +817,7 @@ class TranscriptionApp(QMainWindow):
 
         # If there was a pending transcription, start it now
         if model and self.pending_transcription:
-            print(f"DEBUG: Starting pending transcription...")
+            logger.debug("Starting pending transcription...")
             self.pending_transcription = False
             self.start_transcription_with_model(model)
         elif not model and self.pending_transcription:
@@ -920,7 +920,7 @@ class TranscriptionApp(QMainWindow):
         # Refresh list to show the new recording (disabled in tray-only mode)
         # self.refresh_recording_list()
 
-        print(f"DEBUG: Created initial JSON for recording {self.current_recording_id}")
+        logger.info(f"Created initial JSON for recording {self.current_recording_id}")
 
     def stop_recording(self):
         """Stop audio recording and process"""
@@ -955,9 +955,7 @@ class TranscriptionApp(QMainWindow):
                 # Use QTimer to safely show dialog after save completes
                 QTimer.singleShot(200, self.ask_recording_name)
             except Exception as e:
-                print(f"Error in save_and_continue: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error in save_and_continue: {e}", exc_info=True)
                 if hasattr(self, 'record_btn'):
                     self.record_btn.setEnabled(True)
 
@@ -1011,7 +1009,7 @@ class TranscriptionApp(QMainWindow):
 
     def on_segment_ready(self, segment_file, segment_num):
         """Called when a new 30-second segment is ready"""
-        print(f"DEBUG: Segment {segment_num} ready: {segment_file}")
+        logger.debug(f"Segment {segment_num} ready: {segment_file}")
         self.segments_to_transcribe.append((segment_file, segment_num))
 
         # Start transcribing if not already doing so
@@ -1028,7 +1026,7 @@ class TranscriptionApp(QMainWindow):
         model_name = self.selected_model_name
         if model_name not in self.loaded_models:
             # Model not loaded yet, wait
-            print(f"DEBUG: Model {model_name} not loaded yet, waiting...")
+            logger.warning(f"Model {model_name} not loaded yet, waiting...")
             self.is_transcribing_segment = False
             return
 
@@ -1040,7 +1038,7 @@ class TranscriptionApp(QMainWindow):
 
         def worker():
             try:
-                print(f"DEBUG: Transcribing segment {segment_num}: {segment_file}")
+                logger.debug(f"Transcribing segment {segment_num}: {segment_file}")
 
                 # Use torch.no_grad() to prevent gradient computation and cache issues
                 with torch.no_grad():
@@ -1057,7 +1055,7 @@ class TranscriptionApp(QMainWindow):
                                 if hasattr(block, 'cross_attn') and hasattr(block.cross_attn, 'kv_cache'):
                                     block.cross_attn.kv_cache.clear()
                     except Exception as cache_error:
-                        print(f"DEBUG: Could not clear cache (non-critical): {cache_error}")
+                        logger.debug(f"Could not clear cache (non-critical): {cache_error}")
 
                     result = model.transcribe(
                         segment_file,
@@ -1068,15 +1066,13 @@ class TranscriptionApp(QMainWindow):
                     )
 
                 segment_text = result.get('text', '').strip()
-                print(f"DEBUG: Segment {segment_num} transcribed: {segment_text[:50]}...")
+                logger.debug(f"Segment {segment_num} transcribed: {segment_text[:50]}...")
 
                 # Emit signal with transcribed text
                 self.segment_transcribed.emit(segment_text)
 
             except Exception as e:
-                print(f"ERROR transcribing segment {segment_num}: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error transcribing segment {segment_num}: {e}", exc_info=True)
                 # Mark as not transcribing so we can continue with other segments
                 self.is_transcribing_segment = False
 
@@ -1110,20 +1106,20 @@ class TranscriptionApp(QMainWindow):
             # If 70% or more words match, consider it an overlap
             if similarity >= 0.7:
                 best_overlap_length = overlap_len
-                print(f"DEBUG: Found overlap of {overlap_len} words with {similarity:.1%} similarity")
+                logger.debug(f"Found overlap of {overlap_len} words with {similarity:.1%} similarity")
                 break
 
         # Remove the overlapping portion from the new text
         if best_overlap_length > 0:
             deduplicated = " ".join(new_words[best_overlap_length:])
-            print(f"DEBUG: Removed {best_overlap_length} overlapping words")
+            logger.debug(f"Removed {best_overlap_length} overlapping words")
             return deduplicated
         else:
             return new_text
 
     def on_segment_transcribed(self, segment_text):
         """Handle segment transcription completion"""
-        print(f"DEBUG: on_segment_transcribed called")
+        logger.debug("on_segment_transcribed called")
 
         # Remove overlap with previous segment
         if self.transcribed_segments:
@@ -1149,7 +1145,7 @@ class TranscriptionApp(QMainWindow):
                 with open(transcription_file, 'w', encoding='utf-8') as f:
                     f.write(full_text)
 
-                print(f"DEBUG: Updated transcription file: {transcription_file}")
+                logger.debug(f"Updated transcription file: {transcription_file}")
 
                 # Calculate duration based on number of segments
                 # Formula: first_segment_duration + (remaining_segments * (segment_duration - overlap))
@@ -1171,11 +1167,11 @@ class TranscriptionApp(QMainWindow):
                     duration=calculated_duration
                 )
 
-                print(f"DEBUG: Updated JSON with incremental transcription and duration: {seconds_to_iso_duration(calculated_duration)} ({num_segments} segments)")
+                logger.debug(f"Updated JSON with incremental transcription and duration: {seconds_to_iso_duration(calculated_duration)} ({num_segments} segments)")
             except Exception as e:
-                print(f"ERROR: Failed to write transcription file: {e}")
+                logger.error(f"Failed to write transcription file: {e}", exc_info=True)
 
-        print(f"DEBUG: Updated transcription display ({len(self.transcribed_segments)} segments)")
+        logger.debug(f"Updated transcription display ({len(self.transcribed_segments)} segments)")
 
         # Mark as not transcribing and process next segment
         self.is_transcribing_segment = False
@@ -1183,18 +1179,18 @@ class TranscriptionApp(QMainWindow):
 
         # Check if all segments are done
         if not self.segments_to_transcribe and not self.is_transcribing_segment:
-            print(f"DEBUG: All segments transcribed, saving to database")
+            logger.info("All segments transcribed, saving to database")
 
             # Check if transcription is empty
             if not full_text.strip():
-                print(f"DEBUG: Transcription is empty, deleting recording folder")
+                logger.info("Transcription is empty, deleting recording folder")
                 # Delete the entire recording folder
                 import shutil
                 rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
                 if rec_dir.exists() and rec_dir.is_dir():
                     try:
                         shutil.rmtree(rec_dir)
-                        print(f"DEBUG: Deleted empty recording folder: {rec_dir}")
+                        logger.info(f"Deleted empty recording folder: {rec_dir}")
 
                         # Remove from in-memory recordings list
                         self.recording_manager.recordings = [
@@ -1211,7 +1207,7 @@ class TranscriptionApp(QMainWindow):
                                 2000
                             )
                     except Exception as e:
-                        print(f"ERROR: Failed to delete empty recording folder: {e}")
+                        logger.error(f"Failed to delete empty recording folder: {e}", exc_info=True)
             else:
                 # All segments complete - save transcription, model, and all settings to database
                 self.recording_manager.update_recording(
@@ -1223,12 +1219,12 @@ class TranscriptionApp(QMainWindow):
                 )
                 # Refresh list to show updated model and settings (disabled in tray-only mode)
                 # self.refresh_recording_list()
-                print(f"DEBUG: Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
+                logger.info(f"Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
 
 
     def retranscribe_with_segments(self):
         """Split existing recording into segments and transcribe incrementally"""
-        print(f"DEBUG: Starting segmented retranscription of {self.current_audio_file}")
+        logger.info(f"Starting segmented retranscription of {self.current_audio_file}")
 
         # Split audio file into 30-second segments with 15-second overlap
         def split_audio():
@@ -1237,7 +1233,7 @@ class TranscriptionApp(QMainWindow):
                 import numpy as np
 
                 if not self.current_audio_file:
-                    print("ERROR: No current audio file to split")
+                    logger.error("No current audio file to split")
                     return
 
                 # Open the audio file
@@ -1285,7 +1281,7 @@ class TranscriptionApp(QMainWindow):
                         seg_wf.setframerate(sample_rate)
                         seg_wf.writeframes(segment_data)
 
-                    print(f"DEBUG: Created segment {segment_num}: {segment_filename}")
+                    logger.debug(f"Created segment {segment_num}: {segment_filename}")
                     segment_files.append((str(segment_filename), segment_num))
 
                     # Move forward by (segment_duration - overlap_duration) seconds
@@ -1294,15 +1290,13 @@ class TranscriptionApp(QMainWindow):
 
                 # Queue segments for transcription
                 self.segments_to_transcribe = segment_files
-                print(f"DEBUG: Created {len(segment_files)} segments, starting transcription...")
+                logger.info(f"Created {len(segment_files)} segments, starting transcription...")
 
                 # Start transcribing
                 self.transcribe_next_segment()
 
             except Exception as e:
-                print(f"ERROR splitting audio: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error splitting audio: {e}", exc_info=True)
 
         # Run in thread
         thread = threading.Thread(target=split_audio, daemon=True)
@@ -1310,15 +1304,15 @@ class TranscriptionApp(QMainWindow):
 
     def transcribe_audio(self):
         """Transcribe audio using Whisper"""
-        print(f"DEBUG: Starting transcription for file: {self.current_audio_file}")
-        print(f"DEBUG: Selected model: {self.selected_model_name}")
+        logger.info(f"Starting transcription for file: {self.current_audio_file}")
+        logger.debug(f"Selected model: {self.selected_model_name}")
 
         # Load model if needed, then transcribe
         self.get_or_load_model(self.selected_model_name)
 
     def start_transcription_with_model(self, model):
         """Start transcription with loaded model"""
-        print(f"DEBUG: start_transcription_with_model called")
+        logger.debug("start_transcription_with_model called")
 
         if hasattr(self, 'progress_bar'):
             self.progress_bar.setVisible(True)
@@ -1344,42 +1338,40 @@ class TranscriptionApp(QMainWindow):
 
         def worker():
             try:
-                print(f"DEBUG: Worker thread started with {self.selected_model_name} model")
+                logger.debug(f"Worker thread started with {self.selected_model_name} model")
 
                 # Transcribe with Whisper
-                print(f"DEBUG: Starting Whisper transcription...")
+                logger.info("Starting Whisper transcription...")
                 result = model.transcribe(
                     self.current_audio_file,
                     language="nl",
                     task="transcribe",
                     fp16=False
                 )
-                print(f"DEBUG: Transcription completed!")
+                logger.info("Transcription completed!")
 
                 # Emit signal to update UI in main thread
-                print(f"DEBUG: Emitting transcription_complete signal")
+                logger.debug("Emitting transcription_complete signal")
                 self.transcription_complete.emit(result)
-                print(f"DEBUG: Signal emitted successfully")
+                logger.debug("Signal emitted successfully")
 
             except Exception as e:
-                print(f"DEBUG: Transcription error: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Transcription error: {e}", exc_info=True)
                 self.transcription_complete.emit({"error": str(e)})
 
-        print(f"DEBUG: Creating worker thread...")
+        logger.debug("Creating worker thread...")
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
-        print(f"DEBUG: Worker thread started")
+        logger.debug("Worker thread started")
 
     def on_transcription_complete(self, result):
         """Handle transcription completion in main thread (slot)"""
-        print(f"DEBUG: on_transcription_complete called with result type: {type(result)}")
+        logger.debug(f"on_transcription_complete called with result type: {type(result)}")
         if hasattr(self, 'progress_bar'):
             self.progress_bar.setVisible(False)
 
         if "error" in result:
-            print(f"DEBUG: Error in result: {result['error']}")
+            logger.error(f"Error in result: {result['error']}")
             if hasattr(self, 'status_label'):
                 self.status_label.setText(f"Fout: {result['error']}")
             if hasattr(self, 'status_bar'):
@@ -1388,25 +1380,25 @@ class TranscriptionApp(QMainWindow):
             # Get transcription text
             transcription_text = result.get("text", "")
 
-            print(f"DEBUG: Setting transcription text (length={len(transcription_text)}): {transcription_text[:100]}...")
+            logger.debug(f"Setting transcription text (length={len(transcription_text)}): {transcription_text[:100]}...")
 
             # Update UI
             if hasattr(self, 'transcription_text'):
                 self.transcription_text.clear()
                 self.transcription_text.setPlainText(transcription_text)
 
-            print(f"DEBUG: Text set in UI, updating labels")
+            logger.debug("Text set in UI, updating labels")
 
             # Check if transcription is empty
             if not transcription_text.strip():
-                print(f"DEBUG: Transcription is empty, deleting recording folder")
+                logger.info("Transcription is empty, deleting recording folder")
                 # Delete the entire recording folder
                 import shutil
                 rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
                 if rec_dir.exists() and rec_dir.is_dir():
                     try:
                         shutil.rmtree(rec_dir)
-                        print(f"DEBUG: Deleted empty recording folder: {rec_dir}")
+                        logger.info(f"Deleted empty recording folder: {rec_dir}")
 
                         # Remove from in-memory recordings list
                         self.recording_manager.recordings = [
@@ -1429,7 +1421,7 @@ class TranscriptionApp(QMainWindow):
                                 2000
                             )
                     except Exception as e:
-                        print(f"ERROR: Failed to delete empty recording folder: {e}")
+                        logger.error(f"Failed to delete empty recording folder: {e}", exc_info=True)
             else:
                 # Transcription is not empty - save it
                 if hasattr(self, 'status_label'):
@@ -1438,7 +1430,7 @@ class TranscriptionApp(QMainWindow):
                     self.status_bar.showMessage("Transcriptie succesvol voltooid")
 
                 # Update recording with transcription, model, and all settings
-                print(f"DEBUG: Updating recording in database")
+                logger.debug("Updating recording in database")
                 self.recording_manager.update_recording(
                     self.current_recording_id,
                     transcription=transcription_text,
@@ -1454,7 +1446,7 @@ class TranscriptionApp(QMainWindow):
 
         if hasattr(self, 'record_btn'):
             self.record_btn.setEnabled(True)
-        print(f"DEBUG: on_transcription_complete finished")
+        logger.debug("on_transcription_complete finished")
 
    
     def update_button_states(self):
@@ -1680,7 +1672,7 @@ class TranscriptionApp(QMainWindow):
 
             if hasattr(self, 'status_bar'):
                 self.status_bar.showMessage(f"{len(devices)} audio apparaten gevonden")
-            print(f"DEBUG: Found {len(devices)} audio input devices")
+            logger.info(f"Found {len(devices)} audio input devices")
 
             # Also refresh tray menu
             self.refresh_tray_input_devices()
@@ -1688,9 +1680,7 @@ class TranscriptionApp(QMainWindow):
         except Exception as e:
             if hasattr(self, 'status_bar'):
                 self.status_bar.showMessage(f"Fout bij ophalen audio apparaten: {str(e)}")
-            print(f"ERROR: Failed to refresh audio devices: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Failed to refresh audio devices: {e}", exc_info=True)
 
     def refresh_tray_input_devices(self):
         """Refresh the input device list in the tray menu"""
@@ -1742,12 +1732,10 @@ class TranscriptionApp(QMainWindow):
                         action.setChecked(True)
 
 
-            print(f"DEBUG: Tray menu updated with {len(devices)} audio input devices")
+            logger.debug(f"Tray menu updated with {len(devices)} audio input devices")
 
         except Exception as e:
-            print(f"ERROR: Failed to refresh tray input devices: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Failed to refresh tray input devices: {e}", exc_info=True)
 
     def set_tray_input_device(self, device_index):
         """Set the input device from the tray menu"""
@@ -1779,17 +1767,15 @@ class TranscriptionApp(QMainWindow):
                 2000
             )
 
-            print(f"DEBUG: Input device set to: {device_name} (index: {device_index})")
+            logger.info(f"Input device set to: {device_name} (index: {device_index})")
 
         except Exception as e:
-            print(f"ERROR: Failed to set tray input device: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Failed to set tray input device: {e}", exc_info=True)
 
     def set_tray_model(self, model_name):
         """Set the transcription model from the tray menu"""
         try:
-            print(f"DEBUG: Tray menu - changing model to: {model_name}")
+            logger.debug(f"Tray menu - changing model to: {model_name}")
 
             # Update the selected model
             self.selected_model_name = model_name
@@ -1823,7 +1809,7 @@ class TranscriptionApp(QMainWindow):
                     QSystemTrayIcon.MessageIcon.Information,
                     2000
                 )
-                print(f"DEBUG: {model_name} model already loaded")
+                logger.debug(f"{model_name} model already loaded")
             else:
                 # Model needs to be loaded
                 self.tray_icon.showMessage(
@@ -1832,13 +1818,11 @@ class TranscriptionApp(QMainWindow):
                     QSystemTrayIcon.MessageIcon.Information,
                     3000
                 )
-                print(f"DEBUG: Loading {model_name} model...")
+                logger.info(f"Loading {model_name} model...")
                 self.load_model_async(model_name)
 
         except Exception as e:
-            print(f"ERROR: Failed to set tray model: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Failed to set tray model: {e}", exc_info=True)
 
     
     def apply_settings(self):
@@ -1872,7 +1856,7 @@ class TranscriptionApp(QMainWindow):
         self.recorder.overlap_duration = overlap_duration
         self.recorder.set_input_device(selected_device_index)
 
-        print(f"DEBUG: Audio device set to index: {selected_device_index}")
+        logger.info(f"Audio device set to index: {selected_device_index}")
 
         # Save settings to currently selected recording if one is loaded
         if self.current_recording_id:
@@ -1883,7 +1867,7 @@ class TranscriptionApp(QMainWindow):
             )
             # Refresh list to show updated settings
             self.refresh_recording_list()
-            print(f"DEBUG: Settings saved to recording {self.current_recording_id}")
+            logger.debug(f"Settings saved to recording {self.current_recording_id}")
 
         # Show confirmation
         status_msg = f"Instellingen toegepast: {segment_duration}s fragmenten, {overlap_duration}s overlap"
@@ -1920,11 +1904,11 @@ class TranscriptionApp(QMainWindow):
 
     def cleanup_and_quit(self):
         """Clean up resources before quitting"""
-        print("DEBUG: cleanup_and_quit called")
+        logger.info("cleanup_and_quit called")
 
         # Stop recording if active
         if self.is_recording:
-            print("DEBUG: Stopping active recording...")
+            logger.info("Stopping active recording...")
             self.is_recording = False
             self.timer.stop()
 
@@ -1932,9 +1916,9 @@ class TranscriptionApp(QMainWindow):
         try:
             self.recorder.cleanup()
         except Exception as e:
-            print(f"Error cleaning up recorder: {e}")
+            logger.error(f"Error cleaning up recorder: {e}", exc_info=True)
 
-        print("DEBUG: Cleanup complete")
+        logger.info("Cleanup complete")
 
 
 def start_openapi_server():
@@ -1953,25 +1937,26 @@ def start_openapi_server():
         )
         server = uvicorn.Server(config)
 
-        print("=" * 60)
-        print("🚀 OpenAPI Server Starting...")
-        print(f"   API URL: http://localhost:8000")
-        print(f"   Swagger UI: http://localhost:8000/docs")
-        print(f"   ReDoc: http://localhost:8000/redoc")
-        print(f"   OpenAPI Schema: http://localhost:8000/openapi.json")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("🚀 OpenAPI Server Starting...")
+        logger.info(f"   API URL: http://localhost:8000")
+        logger.info(f"   Swagger UI: http://localhost:8000/docs")
+        logger.info(f"   ReDoc: http://localhost:8000/redoc")
+        logger.info(f"   OpenAPI Schema: http://localhost:8000/openapi.json")
+        logger.info("=" * 60)
 
         # Run the server (this will block in this thread)
         server.run()
     except Exception as e:
-        print(f"ERROR: Failed to start OpenAPI server: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Failed to start OpenAPI server: {e}", exc_info=True)
 
 
 def main():
     """Main application entry point"""
     import signal
+
+    # Initialize logging first
+    setup_logging()
 
     # Handle Ctrl+C gracefully
     signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -1979,7 +1964,7 @@ def main():
     # Start OpenAPI server in background thread
     api_thread = threading.Thread(target=start_openapi_server, daemon=True, name="OpenAPI-Server")
     api_thread.start()
-    print("DEBUG: OpenAPI server thread started")
+    logger.info("OpenAPI server thread started")
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
@@ -1994,7 +1979,7 @@ def main():
     # Run the application
     exit_code = app.exec()
 
-    print("DEBUG: Application exiting cleanly")
+    logger.info("Application exiting cleanly")
     sys.exit(exit_code)
 
 

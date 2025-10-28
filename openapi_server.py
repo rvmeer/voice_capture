@@ -15,6 +15,10 @@ import uvicorn
 
 # Import recording manager
 from recording_manager import RecordingManager
+from logging_config import get_logger
+
+# Setup logging
+logger = get_logger(__name__)
 
 
 # Initialize FastAPI app
@@ -107,10 +111,10 @@ def load_recordings() -> List[Dict[str, Any]]:
                         recording = json.load(f)
                         recordings.append(recording)
                 except Exception as e:
-                    print(f"Error loading recording from {json_file}: {e}")
+                    logger.error(f"Error loading recording from {json_file}: {e}", exc_info=True)
 
     except Exception as e:
-        print(f"Error loading recordings: {e}")
+        logger.error(f"Error loading recordings: {e}", exc_info=True)
 
     return recordings
 
@@ -134,7 +138,7 @@ def get_transcription_text(recording_id: str) -> Optional[str]:
             with open(transcription_file, 'r', encoding='utf-8') as f:
                 return f.read()
         except Exception as e:
-            print(f"Error reading transcription file: {e}")
+            logger.error(f"Error reading transcription file: {e}", exc_info=True)
             return None
 
     # Fallback to JSON if TXT doesn't exist
@@ -268,9 +272,9 @@ async def health_check():
 
 if __name__ == "__main__":
     # Run the server
-    print("Starting Whisper Recordings OpenAPI Server...")
-    print("API documentation available at: http://localhost:8000/docs")
-    print("OpenAPI schema available at: http://localhost:8000/openapi.json")
+    logger.info("Starting Whisper Recordings OpenAPI Server...")
+    logger.info("API documentation available at: http://localhost:8000/docs")
+    logger.info("OpenAPI schema available at: http://localhost:8000/openapi.json")
 
     uvicorn.run(
         app,

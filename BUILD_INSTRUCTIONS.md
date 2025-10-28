@@ -29,6 +29,7 @@ Elke opname wordt opgeslagen in een eigen folder met de volgende structuur:
 - macOS 10.13 of hoger
 - Python 3.13
 - PyInstaller (geïnstalleerd via pip)
+- ffmpeg (geïnstalleerd via Homebrew: `brew install ffmpeg`)
 
 ## Installatie van de App
 
@@ -60,9 +61,26 @@ Vervolgens kun je de app starten vanuit Finder of via Spotlight (⌘+Space, typ 
 
 Als je wijzigingen hebt aangebracht aan de broncode, kun je de app opnieuw bouwen:
 
+### Optie 1: Met build script (aanbevolen)
+
+```bash
+./build_app.sh
+```
+
+Dit script:
+- Controleert of alle vereisten geïnstalleerd zijn (PyInstaller, ffmpeg)
+- Maakt oude builds schoon
+- Bouwt een nieuwe app
+- Toont installatie instructies
+
+### Optie 2: Handmatig
+
 ```bash
 # Zorg dat PyInstaller geïnstalleerd is
 pip install pyinstaller
+
+# Zorg dat ffmpeg geïnstalleerd is
+brew install ffmpeg
 
 # Bouw de app
 pyinstaller voice_capture.spec --clean
@@ -161,6 +179,26 @@ Voor distributie buiten de Mac App Store is notarisatie door Apple vereist:
 
 ## Problemen Oplossen
 
+### ffmpeg niet gevonden
+
+Als je de error `FileNotFoundError: [Errno 2] No such file or directory: 'ffmpeg'` krijgt:
+
+1. Zorg dat ffmpeg geïnstalleerd is:
+   ```bash
+   brew install ffmpeg
+   ```
+
+2. De app bundelt ffmpeg automatisch vanaf `/opt/homebrew/bin/ffmpeg` (Apple Silicon) of `/usr/local/bin/ffmpeg` (Intel)
+
+3. Als ffmpeg op een andere locatie staat, pas `voice_capture.spec` aan:
+   ```python
+   binaries=[
+       ('/path/to/your/ffmpeg', '.'),
+   ],
+   ```
+
+4. Herbouw de app met `./build_app.sh`
+
 ### App start niet
 
 1. Check de Console app (Applications > Utilities > Console) voor foutmeldingen
@@ -168,6 +206,7 @@ Voor distributie buiten de Mac App Store is notarisatie door Apple vereist:
    ```bash
    ./dist/VoiceCapture.app/Contents/MacOS/VoiceCapture
    ```
+3. Check de log files in `~/Documents/VoiceCapture/logs/`
 
 ### Microfoon toegang
 

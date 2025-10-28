@@ -5,12 +5,17 @@ block_cipher = None
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=[
+        # Include ffmpeg for audio processing
+        ('/opt/homebrew/bin/ffmpeg', '.'),
+    ],
     datas=[
         # Include custom modules
         ('audio_recorder.py', '.'),
         ('recording_manager.py', '.'),
         ('openapi_server.py', '.'),
+        ('logging_config.py', '.'),
+        ('mcp_server.py', '.'),
     ],
     hiddenimports=[
         'whisper',
