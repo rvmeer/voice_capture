@@ -38,6 +38,11 @@ cp -r dist/VoiceCapture.app /Applications/
 
 ### ✅ ffmpeg Fix
 De app bundelt nu ffmpeg automatisch, zodat audio transcriptie ook werkt in de gebouwde app.
+- ffmpeg wordt gekopieerd naar de app bundle
+- PATH wordt automatisch aangepast bij opstart om ffmpeg te vinden
+
+### ✅ Whisper Assets Fix
+Whisper data files (mel_filters.npz, tokenizers) worden nu correct meegenomen in de app bundle.
 
 ### ✅ Logging
 Alle logs worden opgeslagen in: `~/Documents/VoiceCapture/logs/`
@@ -55,6 +60,16 @@ De MCP server (`mcp_server.py`) schrijft **alleen naar logfiles**, niet naar std
 1. Check of ffmpeg geïnstalleerd is: `which ffmpeg`
 2. Als het ergens anders staat dan `/opt/homebrew/bin/ffmpeg`, pas `voice_capture.spec` aan
 3. Herbouw de app: `./build_app.sh`
+
+### Problem: "mel_filters.npz not found" of andere Whisper asset errors
+
+**Oplossing:**
+Dit is opgelost in de huidige build - Whisper assets worden automatisch meegenomen. Als je toch deze error krijgt:
+1. Check of de assets in de bundle zitten:
+   ```bash
+   find dist/VoiceCapture.app -name "mel_filters.npz"
+   ```
+2. Als ze er niet zijn, herbouw de app: `./build_app.sh`
 
 ### Problem: App start niet
 
