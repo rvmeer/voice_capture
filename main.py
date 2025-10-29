@@ -1139,6 +1139,7 @@ class TranscriptionApp(QMainWindow):
         if self.current_recording_id and full_text.strip():
             try:
                 rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
+                rec_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
                 transcription_file = rec_dir / f"transcription_{self.current_recording_id}.txt"
 
                 # Write TXT file
@@ -1954,6 +1955,10 @@ def start_openapi_server():
 def main():
     """Main application entry point"""
     import signal
+    import multiprocessing
+
+    # Required for PyInstaller on macOS to prevent duplicate processes
+    multiprocessing.freeze_support()
 
     # Initialize logging first
     setup_logging()
