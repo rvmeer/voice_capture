@@ -81,7 +81,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='VoiceCapture.app',
-    icon=None,  # Add icon path here if you have one: 'icon.icns'
+    icon='icon.icns',
     bundle_identifier='com.voicecapture.app',
     info_plist={
         'NSPrincipalClass': 'NSApplication',
