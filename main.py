@@ -1967,7 +1967,7 @@ def main():
     # PyInstaller bundles ffmpeg in Contents/Frameworks
     if getattr(sys, 'frozen', False):
         # Running in a PyInstaller bundle
-        bundle_dir = Path(sys._MEIPASS)
+        bundle_dir = Path(getattr(sys, '_MEIPASS', '.'))
         # Add both possible locations to PATH
         os.environ['PATH'] = f"{bundle_dir}:{bundle_dir.parent / 'Frameworks'}:{os.environ.get('PATH', '')}"
         logger.info(f"Running as bundled app, updated PATH to include: {bundle_dir}")
