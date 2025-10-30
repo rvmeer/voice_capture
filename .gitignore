@@ -7,3 +7,14 @@ recordings_old/
 build/
 dist/
 .DS_Store
+
+# Windows-specific
+*.exe
+*.msi
+installer_output/
+icon.iconset/
+
+# Icon generation artifacts
+icon.png
+create_icon.py
+create_windows_icon.py

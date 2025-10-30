@@ -1963,14 +1963,26 @@ def main():
     # Initialize logging first
     setup_logging()
 
-    # Fix PATH for bundled ffmpeg in macOS app
-    # PyInstaller bundles ffmpeg in Contents/Frameworks
+    # Fix PATH for bundled ffmpeg (cross-platform)
     if getattr(sys, 'frozen', False):
         # Running in a PyInstaller bundle
         bundle_dir = Path(getattr(sys, '_MEIPASS', '.'))
-        # Add both possible locations to PATH
-        os.environ['PATH'] = f"{bundle_dir}:{bundle_dir.parent / 'Frameworks'}:{os.environ.get('PATH', '')}"
-        logger.info(f"Running as bundled app, updated PATH to include: {bundle_dir}")
+
+        # Platform-specific PATH handling
+        if sys.platform == 'darwin':  # macOS
+            # PyInstaller bundles ffmpeg in Contents/Frameworks on macOS
+            path_separator = ':'
+            new_paths = f"{bundle_dir}{path_separator}{bundle_dir.parent / 'Frameworks'}"
+        elif sys.platform == 'win32':  # Windows
+            # On Windows, ffmpeg should be in the same directory as the exe
+            path_separator = ';'
+            new_paths = str(bundle_dir)
+        else:  # Linux
+            path_separator = ':'
+            new_paths = str(bundle_dir)
+
+        os.environ['PATH'] = f"{new_paths}{path_separator}{os.environ.get('PATH', '')}"
+        logger.info(f"Running as bundled app on {sys.platform}, updated PATH to include: {bundle_dir}")
 
     # Handle Ctrl+C gracefully
     signal.signal(signal.SIGINT, signal.SIG_DFL)
