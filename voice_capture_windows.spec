@@ -3,18 +3,30 @@
 
 import sys
 import os
+from pathlib import Path
 
 block_cipher = None
+
+# Auto-detect FFmpeg location
+ffmpeg_binaries = []
+
+# Check for downloaded FFmpeg (from download_ffmpeg_windows.py)
+ffmpeg_local = Path('ffmpeg_windows/ffmpeg.exe')
+if ffmpeg_local.exists():
+    print(f"✓ Found FFmpeg at: {ffmpeg_local} (will bundle)")
+    ffmpeg_binaries.append((str(ffmpeg_local), '.'))
+else:
+    print("⚠ FFmpeg not found at ffmpeg_windows/ffmpeg.exe")
+    print("  Run: python download_ffmpeg_windows.py")
+    print("  Or users will need to install FFmpeg separately")
+
+# You can also manually specify FFmpeg location:
+# ffmpeg_binaries.append(('C:\\ffmpeg\\bin\\ffmpeg.exe', '.'))
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[
-        # FFmpeg will need to be downloaded separately for Windows
-        # Users should place ffmpeg.exe in the same folder as the app
-        # Or you can bundle it by uncommenting and providing the path:
-        # ('C:\\ffmpeg\\bin\\ffmpeg.exe', '.'),
-    ],
+    binaries=ffmpeg_binaries,
     datas=[
         # Include custom modules
         ('audio_recorder.py', '.'),

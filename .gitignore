@@ -13,6 +13,7 @@ dist/
 *.msi
 installer_output/
 icon.iconset/
+ffmpeg_windows/
 
 # Icon generation artifacts
 icon.png

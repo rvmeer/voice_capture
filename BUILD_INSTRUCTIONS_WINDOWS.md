@@ -51,10 +51,14 @@ env\Scripts\activate
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Build application
+# 3. Download FFmpeg (automatic)
+# This happens automatically during build, or run manually:
+python download_ffmpeg_windows.py
+
+# 4. Build application
 build_app.bat
 
-# 4. (Optional) Create installer
+# 5. (Optional) Create installer
 build_installer.bat
 ```
 
@@ -94,26 +98,21 @@ This will install:
 
 **Note**: Installation may take 5-10 minutes depending on your internet speed.
 
-### Step 3: Configure FFmpeg Path
+### Step 3: Download FFmpeg (Automatic)
 
-You have two options:
+FFmpeg will be **automatically downloaded** when you run `build_app.bat`.
 
-**Option A: Bundle ffmpeg with the app**
+If you want to download it manually first:
 
-1. Edit `voice_capture_windows.spec`
-2. Find the `binaries` section (around line 10)
-3. Uncomment and update the ffmpeg path:
-
-```python
-binaries=[
-    ('C:\\path\\to\\ffmpeg\\bin\\ffmpeg.exe', '.'),
-],
+```cmd
+python download_ffmpeg_windows.py
 ```
 
-**Option B: Require users to install ffmpeg separately**
+This downloads FFmpeg (~100MB) to `ffmpeg_windows/ffmpeg.exe` and will be automatically bundled with your app.
 
-- Keep the `binaries` section empty
-- Users will need to place `ffmpeg.exe` in the same folder as `VoiceCapture.exe`
+**No configuration needed!** The build process detects FFmpeg automatically.
+
+**Alternative**: If you already have FFmpeg installed, you can manually edit `voice_capture_windows.spec` (line 24) to point to your existing installation.
 
 ### Step 4: Update Whisper Assets Path
 
@@ -136,7 +135,8 @@ python -c "import whisper; import os; print(os.path.dirname(whisper.__file__))"
 build_app.bat
 ```
 
-This will:
+This will automatically:
+0. Check for and download FFmpeg if needed (~100MB)
 1. Clean previous builds
 2. Install PyInstaller (if needed)
 3. Build the executable
