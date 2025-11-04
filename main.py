@@ -1040,6 +1040,24 @@ class TranscriptionApp(QMainWindow):
             try:
                 logger.debug(f"Transcribing segment {segment_num}: {segment_file}")
 
+                # Check if audio file has sufficient duration
+                # Whisper fails with tensor errors on very short or empty audio
+                try:
+                    with wave.open(segment_file, 'rb') as wf:
+                        frames = wf.getnframes()
+                        rate = wf.getframerate()
+                        duration = frames / float(rate)
+
+                        # Minimum 0.1 seconds of audio required
+                        if duration < 0.1:
+                            logger.warning(f"Segment {segment_num} too short ({duration:.2f}s), skipping transcription")
+                            self.segment_transcribed.emit("")  # Emit empty text
+                            return
+                except Exception as audio_check_error:
+                    logger.error(f"Error checking audio duration for segment {segment_num}: {audio_check_error}")
+                    self.segment_transcribed.emit("")  # Emit empty text on error
+                    return
+
                 # Use torch.no_grad() to prevent gradient computation and cache issues
                 with torch.no_grad():
                     # Clear model decoder state to prevent KeyError in kv_cache
@@ -1073,8 +1091,8 @@ class TranscriptionApp(QMainWindow):
 
             except Exception as e:
                 logger.error(f"Error transcribing segment {segment_num}: {e}", exc_info=True)
-                # Mark as not transcribing so we can continue with other segments
-                self.is_transcribing_segment = False
+                # Emit empty text so the JSON still gets updated
+                self.segment_transcribed.emit("")
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
