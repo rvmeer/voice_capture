@@ -2002,6 +2002,26 @@ def main():
     # Initialize logging first
     setup_logging()
 
+    # Log version information
+    try:
+        from version import get_version_info
+        version_info = get_version_info()
+        logger.info("=" * 60)
+        logger.info("VoiceCapture Starting")
+        logger.info("=" * 60)
+        logger.info(f"Version: {version_info['commit_short']}")
+        logger.info(f"Date: {version_info['date']}")
+        logger.info(f"Branch: {version_info['branch']}")
+        logger.info(f"Commit: {version_info['commit']}")
+        if version_info['dirty']:
+            logger.warning("Warning: Running with uncommitted changes")
+        logger.info("=" * 60)
+    except Exception as e:
+        logger.info("=" * 60)
+        logger.info("VoiceCapture Starting (Development Mode)")
+        logger.info("=" * 60)
+        logger.debug(f"Version info not available: {e}")
+
     # Fix PATH for bundled ffmpeg (cross-platform)
     if getattr(sys, 'frozen', False):
         # Running in a PyInstaller bundle
