@@ -8,6 +8,9 @@ build/
 dist/
 .DS_Store
 
+# Build-generated version file
+version.py
+
 # Windows-specific
 *.exe
 *.msi

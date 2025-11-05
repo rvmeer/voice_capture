@@ -22,6 +22,7 @@ import torch
 from audio_recorder import AudioRecorder
 from recording_manager import RecordingManager, iso_duration_to_seconds, seconds_to_iso_duration
 from logging_config import setup_logging, get_logger
+from version import get_version_string
 
 # Setup logging
 logger = get_logger(__name__)
@@ -212,6 +213,13 @@ class TranscriptionApp(QMainWindow):
         # show_action = tray_menu.addAction("Toon Venster")
         # if show_action is not None:
         #     show_action.triggered.connect(self.show)
+
+        # Add version info action
+        version_action = tray_menu.addAction("Toon Versie")
+        if version_action is not None:
+            version_action.triggered.connect(self.show_version_info)
+
+        tray_menu.addSeparator()
 
         # Add quit action
         quit_action = tray_menu.addAction("Afsluiten")
@@ -1915,6 +1923,19 @@ class TranscriptionApp(QMainWindow):
         # In tray-only mode, if close is called, clean up and quit
         self.cleanup_and_quit()
         event.accept()
+
+    def show_version_info(self):
+        """Show version information dialog"""
+        from PyQt6.QtWidgets import QMessageBox
+
+        version_text = get_version_string()
+
+        msg = QMessageBox()
+        msg.setWindowTitle("VoiceCapture Versie Informatie")
+        msg.setText(version_text)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
 
     def quit_application(self):
         """Quit the application properly"""
