@@ -16,6 +16,10 @@ a = Analysis(
         ('openapi_server.py', '.'),
         ('logging_config.py', '.'),
         ('mcp_server.py', '.'),
+        # Include version file (generated during build)
+        ('version.py', '.'),
+        # Include Qt configuration
+        ('qt.conf', '.'),
         # Include Whisper assets (mel_filters, tokenizers, etc.)
         ('env/lib/python3.13/site-packages/whisper/assets', 'whisper/assets'),
     ],
