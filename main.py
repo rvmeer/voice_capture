@@ -110,6 +110,9 @@ class TranscriptionApp(QMainWindow):
         self.transcribed_segments = []  # List of transcribed texts
         self.is_transcribing_segment = False  # Flag to track if currently transcribing
 
+        # Track retranscription metadata
+        self.retranscribe_metadata = None  # Metadata for retranscription (if any)
+
         # Track summary generation
         self.is_generating_summary = False  # Flag to track if currently generating summary
         self.pending_summary_needed = False  # Flag to indicate if a summary is needed after current one completes
@@ -206,6 +209,13 @@ class TranscriptionApp(QMainWindow):
 
         # Will be populated by refresh_tray_input_devices()
         tray_menu.addMenu(self.input_menu)
+
+        tray_menu.addSeparator()
+
+        # Add retranscribe action
+        retranscribe_action = tray_menu.addAction("Hertranscriberen")
+        if retranscribe_action is not None:
+            retranscribe_action.triggered.connect(self.show_retranscribe_dialog)
 
         tray_menu.addSeparator()
 
@@ -1456,15 +1466,64 @@ class TranscriptionApp(QMainWindow):
                 if hasattr(self, 'status_bar'):
                     self.status_bar.showMessage("Transcriptie succesvol voltooid")
 
-                # Update recording with transcription, model, and all settings
-                logger.debug("Updating recording in database")
-                self.recording_manager.update_recording(
-                    self.current_recording_id,
-                    transcription=transcription_text,
-                    model=self.selected_model_name,
-                    segment_duration=self.segment_duration,
-                    overlap_duration=self.overlap_duration
-                )
+                # Check if this is a retranscription
+                is_retranscription = hasattr(self, 'retranscribe_metadata') and self.retranscribe_metadata is not None
+
+                if is_retranscription:
+                    # Hertranscription: Write JSON and transcription file
+                    logger.info("Completing retranscription - writing files")
+
+                    # Update metadata with transcription
+                    self.retranscribe_metadata['transcription'] = transcription_text
+
+                    # Get recording directory
+                    rec_dir = self.recording_manager.recordings_dir / f"recording_{self.current_recording_id}"
+                    rec_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Write transcription text file
+                    transcription_file = rec_dir / f"transcription_{self.current_recording_id}.txt"
+                    try:
+                        with open(transcription_file, 'w', encoding='utf-8') as f:
+                            f.write(transcription_text)
+                        logger.info(f"Wrote transcription file: {transcription_file}")
+                    except Exception as e:
+                        logger.error(f"Failed to write transcription file: {e}", exc_info=True)
+
+                    # Check if recording exists in manager's list
+                    existing_rec = self.recording_manager.get_recording(self.current_recording_id)
+                    if existing_rec:
+                        # Update existing recording
+                        existing_rec.update(self.retranscribe_metadata)
+                    else:
+                        # Add new recording to the list
+                        self.recording_manager.recordings.insert(0, self.retranscribe_metadata)
+
+                    # Save JSON file
+                    self.recording_manager.save_recording(self.retranscribe_metadata)
+                    logger.info(f"Saved JSON metadata for recording {self.current_recording_id}")
+
+                    # Show completion notification
+                    if self.tray_icon:
+                        recording_name = self.retranscribe_metadata.get('name', self.current_recording_id)
+                        self.tray_icon.showMessage(
+                            "Hertranscriptie Voltooid",
+                            f"'{recording_name}' is succesvol hertranscribeerd met het {self.selected_model_name} model.",
+                            QSystemTrayIcon.MessageIcon.Information,
+                            3000
+                        )
+
+                    # Clear retranscribe metadata
+                    self.retranscribe_metadata = None
+                else:
+                    # Normal transcription: Update recording with transcription, model, and all settings
+                    logger.debug("Updating recording in database")
+                    self.recording_manager.update_recording(
+                        self.current_recording_id,
+                        transcription=transcription_text,
+                        model=self.selected_model_name,
+                        segment_duration=self.segment_duration,
+                        overlap_duration=self.overlap_duration
+                    )
 
                 # Refresh the recording list to show updated model (disabled in tray-only mode)
                 # self.refresh_recording_list()
@@ -1936,6 +1995,192 @@ class TranscriptionApp(QMainWindow):
         msg.setIcon(QMessageBox.Icon.Information)
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
+
+    def show_retranscribe_dialog(self):
+        """Show dialog to select a recording to retranscribe"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QPushButton, QLabel, QHBoxLayout, QListWidgetItem
+
+        # Check if currently recording
+        if self.is_recording:
+            QMessageBox.warning(None, "Fout", "Stop eerst de huidige opname voordat je hertranscribeert.")
+            return
+
+        # Check if currently transcribing
+        if self.is_transcribing_segment:
+            QMessageBox.warning(None, "Fout", "Wacht tot de huidige transcriptie is voltooid.")
+            return
+
+        # Load all recordings
+        self.recording_manager.load_recordings()
+        all_recordings = self.recording_manager.recordings
+
+        # Filter recordings to only include those with a WAV file
+        recordings = []
+        for recording in all_recordings:
+            recording_id = recording.get('id', '')
+            # Check if recording_<timestamp>.wav exists
+            rec_dir = self.recording_manager.recordings_dir / f"recording_{recording_id}"
+            audio_file = rec_dir / f"recording_{recording_id}.wav"
+            if audio_file.exists():
+                recordings.append(recording)
+
+        if not recordings:
+            QMessageBox.information(None, "Geen Opnames", "Er zijn geen opnames met audio bestanden gevonden om te hertranscriberen.")
+            return
+
+        # Create dialog
+        dialog = QDialog()
+        dialog.setWindowTitle("Selecteer Opname voor Hertranscriptie")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(400)
+
+        layout = QVBoxLayout()
+
+        # Add instruction label
+        instruction_label = QLabel(f"Selecteer een opname om te hertranscriberen met het <b>{self.selected_model_name}</b> model:")
+        layout.addWidget(instruction_label)
+
+        # Create list widget
+        list_widget = QListWidget()
+
+        # Populate with recordings that have WAV files
+        for recording in recordings:
+            recording_id = recording.get('id', '')
+            recording_name = recording.get('name', recording_id)
+            recording_date = recording.get('date', '')
+            duration = recording.get('duration', '')
+
+            # Format display text
+            display_text = f"{recording_name} - {recording_date}"
+            if duration:
+                display_text += f" ({duration})"
+
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, recording_id)
+            list_widget.addItem(item)
+
+        layout.addWidget(list_widget)
+
+        # Add buttons
+        button_layout = QHBoxLayout()
+
+        ok_button = QPushButton("Hertranscriberen")
+        cancel_button = QPushButton("Annuleren")
+
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+
+        layout.addLayout(button_layout)
+
+        dialog.setLayout(layout)
+
+        # Connect buttons
+        def on_ok():
+            selected_items = list_widget.selectedItems()
+            if not selected_items:
+                QMessageBox.warning(dialog, "Geen Selectie", "Selecteer een opname om te hertranscriberen.")
+                return
+
+            selected_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+            dialog.accept()
+
+            # Start retranscription
+            self.start_retranscription(selected_id)
+
+        def on_cancel():
+            dialog.reject()
+
+        ok_button.clicked.connect(on_ok)
+        cancel_button.clicked.connect(on_cancel)
+
+        # Double-click to select
+        list_widget.itemDoubleClicked.connect(on_ok)
+
+        # Show dialog
+        dialog.exec()
+
+    def start_retranscription(self, recording_id):
+        """Start retranscription of a recording with the current model"""
+        import wave
+        from datetime import datetime
+
+        # Get recording
+        recording = self.recording_manager.get_recording(recording_id)
+
+        # Construct the audio file path
+        rec_dir = self.recording_manager.recordings_dir / f"recording_{recording_id}"
+        audio_file = rec_dir / f"recording_{recording_id}.wav"
+
+        # Verify audio file exists
+        if not audio_file.exists():
+            QMessageBox.warning(None, "Fout", f"Audio bestand niet gevonden: {audio_file}")
+            return
+
+        logger.info(f"Starting retranscription of {recording_id} with model {self.selected_model_name}")
+
+        # Get existing name if available
+        existing_name = recording.get('name', '') if recording else ''
+
+        # Parse date from folder name (recording_YYYYMMDD_HHMMSS)
+        timestamp_str = recording_id
+        try:
+            date_obj = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+            date_iso = date_obj.strftime("%Y-%m-%d %H:%M:%S")
+        except:
+            date_iso = recording.get('date', datetime.now().strftime("%Y-%m-%d %H:%M:%S")) if recording else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Get audio duration from file
+        try:
+            with wave.open(str(audio_file), 'rb') as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                duration_seconds = frames / float(rate)
+                duration_iso = seconds_to_iso_duration(duration_seconds)
+        except Exception as e:
+            logger.error(f"Error getting audio duration: {e}")
+            duration_iso = recording.get('duration', 'PT0S') if recording else 'PT0S'
+
+        # Get segment settings (use existing if available, otherwise use app defaults)
+        segment_duration = recording.get('segment_duration', self.segment_duration) if recording else self.segment_duration
+        overlap_duration = recording.get('overlap_duration', self.overlap_duration) if recording else self.overlap_duration
+
+        # Store metadata for later use (will be written after transcription completes)
+        self.retranscribe_metadata = {
+            'id': recording_id,
+            'audio_file': str(audio_file),
+            'name': existing_name,
+            'date': date_iso,
+            'duration': duration_iso,
+            'model': self.selected_model_name,
+            'segment_duration': segment_duration,
+            'overlap_duration': overlap_duration
+        }
+
+        # Set current recording info for transcription
+        self.current_audio_file = str(audio_file)
+        self.current_recording_id = recording_id
+
+        # Show notification
+        if self.tray_icon:
+            model_times = {
+                "tiny": "5-10 seconden",
+                "small": "15-30 seconden",
+                "medium": "30-60 seconden",
+                "large": "1-3 minuten"
+            }
+            time_estimate = model_times.get(self.selected_model_name, "enkele seconden")
+
+            self.tray_icon.showMessage(
+                "Hertranscriptie Gestart",
+                f"Hertranscriberen van '{existing_name or recording_id}' met {self.selected_model_name} model (~{time_estimate})...",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000
+            )
+
+        logger.info(f"Starting full file retranscription for {recording_id}")
+
+        # Start full file transcription (not segmented)
+        self.transcribe_audio()
 
     def quit_application(self):
         """Quit the application properly"""
