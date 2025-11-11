@@ -113,6 +113,9 @@ class TranscriptionApp(QMainWindow):
         # Track retranscription metadata
         self.retranscribe_metadata = None  # Metadata for retranscription (if any)
 
+        # Track pending recording name (set when recording stops)
+        self.pending_recording_name = None
+
         # Track summary generation
         self.is_generating_summary = False  # Flag to track if currently generating summary
         self.pending_summary_needed = False  # Flag to indicate if a summary is needed after current one completes
@@ -1001,21 +1004,124 @@ class TranscriptionApp(QMainWindow):
             else:
                 recording_name = f"Opname {self.current_recording_id}"
 
-        # Get audio duration
-        duration = self.recording_manager.get_audio_duration(self.current_audio_file)
+        # Store the recording name for later use
+        self.pending_recording_name = recording_name
 
-        # Update existing recording with final name and duration
-        self.recording_manager.update_recording(
-            self.current_recording_id,
-            name=recording_name,
-            duration=duration
+        # Wait for all segments to be transcribed, then finalize
+        logger.info(f"Recording stopped, waiting for all segments to be transcribed...")
+        self.check_and_finalize_recording()
+
+    def check_and_finalize_recording(self):
+        """Check if all segments are transcribed and finalize the recording"""
+        # Check if all segments have been transcribed
+        if self.segments_to_transcribe or self.is_transcribing_segment:
+            # Still transcribing - wait a bit and check again
+            logger.debug("Still transcribing segments, checking again in 1 second...")
+            QTimer.singleShot(1000, self.check_and_finalize_recording)
+            return
+
+        logger.info("All segments transcribed, finalizing recording...")
+        self.finalize_recording()
+
+    def finalize_recording(self):
+        """Finalize recording by combining transcriptions and creating JSON"""
+        import wave
+
+        # Combine all segment transcriptions
+        final_transcription = self.combine_segment_transcriptions()
+
+        # Check if transcription is empty
+        if not final_transcription.strip():
+            logger.info("Transcription is empty, deleting recording folder")
+            # Delete the entire recording folder
+            import shutil
+            rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
+            if rec_dir.exists() and rec_dir.is_dir():
+                try:
+                    shutil.rmtree(rec_dir)
+                    logger.info(f"Deleted empty recording folder: {rec_dir}")
+
+                    # Show notification in tray-only mode
+                    if hasattr(self, 'tray_icon'):
+                        self.tray_icon.showMessage(
+                            "Opname Verwijderd",
+                            "Opname was leeg en is automatisch verwijderd",
+                            QSystemTrayIcon.MessageIcon.Information,
+                            2000
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to delete empty recording folder: {e}", exc_info=True)
+
+            # Re-enable record button
+            if hasattr(self, 'record_btn'):
+                self.record_btn.setEnabled(True)
+            return
+
+        # Write final transcription file
+        rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
+        transcription_file = rec_dir / f"transcription_{self.current_recording_id}.txt"
+        try:
+            with open(transcription_file, 'w', encoding='utf-8') as f:
+                f.write(final_transcription)
+            logger.info(f"Wrote final transcription file: {transcription_file}")
+        except Exception as e:
+            logger.error(f"Failed to write final transcription file: {e}", exc_info=True)
+
+        # Get audio duration from the main recording file
+        try:
+            audio_file = rec_dir / f"recording_{self.current_recording_id}.wav"
+            with wave.open(str(audio_file), 'rb') as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                duration_seconds = frames / float(rate)
+        except Exception as e:
+            logger.error(f"Failed to get audio duration: {e}")
+            duration_seconds = 0
+
+        # Parse date from recording ID
+        from datetime import datetime
+        try:
+            date_obj = datetime.strptime(self.current_recording_id, "%Y%m%d_%H%M%S")
+            date_iso = date_obj.strftime("%Y-%m-%d %H:%M:%S")
+        except:
+            date_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Create JSON with all metadata
+        audio_file_path = str(rec_dir / f"recording_{self.current_recording_id}.wav")
+
+        # Add recording to manager (this will create the JSON file)
+        self.recording_manager.add_recording(
+            audio_file=audio_file_path,
+            timestamp=self.current_recording_id,
+            name=self.pending_recording_name,
+            transcription=final_transcription,
+            summary="",
+            duration=duration_seconds,
+            model=self.selected_model_name,
+            segment_duration=self.segment_duration,
+            overlap_duration=self.overlap_duration
         )
 
-        # Refresh list (disabled in tray-only mode)
-        # self.refresh_recording_list()
+        logger.info(f"Recording finalized: {self.pending_recording_name}")
 
-        # Start transcription in background
-        self.transcribe_audio()
+        # Show notification
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.showMessage(
+                "Opname Voltooid",
+                f"'{self.pending_recording_name}' is opgeslagen en getranscribeerd",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+
+        # Update status
+        if hasattr(self, 'status_label'):
+            self.status_label.setText("✅ Opname voltooid")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("Opname succesvol opgeslagen")
+
+        # Re-enable record button
+        if hasattr(self, 'record_btn'):
+            self.record_btn.setEnabled(True)
 
     def update_timer(self):
         """Update recording timer display"""
@@ -1157,58 +1263,33 @@ class TranscriptionApp(QMainWindow):
         """Handle segment transcription completion"""
         logger.debug("on_segment_transcribed called")
 
-        # Remove overlap with previous segment
-        if self.transcribed_segments:
-            previous_text = self.transcribed_segments[-1]
-            segment_text = self.remove_overlap(previous_text, segment_text)
+        # Store segment transcription with its number
+        # We keep track of which segment this is
+        current_segment_num = len(self.transcribed_segments)
+        self.transcribed_segments.append(segment_text)
 
-        # Only add if there's text left after deduplication
-        if segment_text.strip():
-            self.transcribed_segments.append(segment_text)
+        # Save individual segment transcription to file
+        if self.current_recording_id and segment_text.strip():
+            try:
+                rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
+                segments_dir = rec_dir / "segments"
+                segments_dir.mkdir(parents=True, exist_ok=True)
 
-        # Update UI with concatenated text
+                # Write individual segment transcription file
+                segment_transcription_file = segments_dir / f"transcription_{current_segment_num:03d}.txt"
+                with open(segment_transcription_file, 'w', encoding='utf-8') as f:
+                    f.write(segment_text)
+
+                logger.debug(f"Saved segment transcription: {segment_transcription_file}")
+            except Exception as e:
+                logger.error(f"Failed to write segment transcription file: {e}", exc_info=True)
+
+        # Update UI with concatenated text (for display only, not saved yet)
         full_text = " ".join(self.transcribed_segments)
         if hasattr(self, 'transcription_text'):
             self.transcription_text.setPlainText(full_text)
 
-        # Write incremental transcription to file (both TXT and update JSON)
-        if self.current_recording_id and full_text.strip():
-            try:
-                rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
-                rec_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
-                transcription_file = rec_dir / f"transcription_{self.current_recording_id}.txt"
-
-                # Write TXT file
-                with open(transcription_file, 'w', encoding='utf-8') as f:
-                    f.write(full_text)
-
-                logger.debug(f"Updated transcription file: {transcription_file}")
-
-                # Calculate duration based on number of segments
-                # Formula: first_segment_duration + (remaining_segments * (segment_duration - overlap))
-                num_segments = len(self.transcribed_segments)
-                if num_segments > 0:
-                    if num_segments == 1:
-                        # First segment: full segment duration
-                        calculated_duration = self.segment_duration
-                    else:
-                        # First segment + additional segments (each adds segment_duration - overlap)
-                        calculated_duration = self.segment_duration + ((num_segments - 1) * (self.segment_duration - self.overlap_duration))
-                else:
-                    calculated_duration = 0
-
-                # Update JSON file with current transcription and calculated duration
-                self.recording_manager.update_recording(
-                    self.current_recording_id,
-                    transcription=full_text,
-                    duration=calculated_duration
-                )
-
-                logger.debug(f"Updated JSON with incremental transcription and duration: {seconds_to_iso_duration(calculated_duration)} ({num_segments} segments)")
-            except Exception as e:
-                logger.error(f"Failed to write transcription file: {e}", exc_info=True)
-
-        logger.debug(f"Updated transcription display ({len(self.transcribed_segments)} segments)")
+        logger.debug(f"Segment {current_segment_num} transcribed ({len(self.transcribed_segments)} total segments)")
 
         # Mark as not transcribing and process next segment
         self.is_transcribing_segment = False
@@ -1216,48 +1297,64 @@ class TranscriptionApp(QMainWindow):
 
         # Check if all segments are done
         if not self.segments_to_transcribe and not self.is_transcribing_segment:
-            logger.info("All segments transcribed, saving to database")
+            logger.info("All segments transcribed")
 
-            # Check if transcription is empty
-            if not full_text.strip():
-                logger.info("Transcription is empty, deleting recording folder")
-                # Delete the entire recording folder
-                import shutil
-                rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
-                if rec_dir.exists() and rec_dir.is_dir():
-                    try:
-                        shutil.rmtree(rec_dir)
-                        logger.info(f"Deleted empty recording folder: {rec_dir}")
+            # All segments transcribed - nothing to do here
+            # Transcription files and JSON will be created when recording stops
+            logger.info("All segments transcribed - waiting for recording to stop")
 
-                        # Remove from in-memory recordings list
-                        self.recording_manager.recordings = [
-                            rec for rec in self.recording_manager.recordings
-                            if rec.get("id") != self.current_recording_id
-                        ]
+    def combine_segment_transcriptions(self):
+        """Combine all segment transcription files into final transcription"""
+        logger.info("Combining segment transcriptions...")
 
-                        # Show notification in tray-only mode
-                        if hasattr(self, 'tray_icon'):
-                            self.tray_icon.showMessage(
-                                "Opname Verwijderd",
-                                "Opname was leeg en is automatisch verwijderd",
-                                QSystemTrayIcon.MessageIcon.Information,
-                                2000
-                            )
-                    except Exception as e:
-                        logger.error(f"Failed to delete empty recording folder: {e}", exc_info=True)
+        rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
+        segments_dir = rec_dir / "segments"
+
+        if not segments_dir.exists():
+            logger.warning(f"Segments directory not found: {segments_dir}")
+            return ""
+
+        # Find all transcription files in segments folder
+        transcription_files = sorted(segments_dir.glob("transcription_*.txt"))
+
+        if not transcription_files:
+            logger.warning("No segment transcription files found")
+            return ""
+
+        # Read all segment transcriptions
+        segment_texts = []
+        for trans_file in transcription_files:
+            try:
+                with open(trans_file, 'r', encoding='utf-8') as f:
+                    text = f.read().strip()
+                    if text:
+                        segment_texts.append(text)
+                logger.debug(f"Read segment transcription: {trans_file.name}")
+            except Exception as e:
+                logger.error(f"Failed to read {trans_file}: {e}")
+
+        if not segment_texts:
+            logger.warning("All segment transcriptions are empty")
+            return ""
+
+        # Remove overlap between consecutive segments
+        combined_texts = []
+        for i, text in enumerate(segment_texts):
+            if i == 0:
+                # First segment: add as-is
+                combined_texts.append(text)
             else:
-                # All segments complete - save transcription, model, and all settings to database
-                self.recording_manager.update_recording(
-                    self.current_recording_id,
-                    transcription=full_text,
-                    model=self.selected_model_name,
-                    segment_duration=self.segment_duration,
-                    overlap_duration=self.overlap_duration
-                )
-                # Refresh list to show updated model and settings (disabled in tray-only mode)
-                # self.refresh_recording_list()
-                logger.info(f"Model {self.selected_model_name} and all settings saved for recording {self.current_recording_id}")
+                # Remove overlap with previous segment
+                previous_text = combined_texts[-1]
+                deduplicated_text = self.remove_overlap(previous_text, text)
+                if deduplicated_text.strip():
+                    combined_texts.append(deduplicated_text)
 
+        # Join all texts
+        final_transcription = " ".join(combined_texts)
+        logger.info(f"Combined {len(segment_texts)} segment transcriptions into final transcription ({len(final_transcription)} chars)")
+
+        return final_transcription
 
     def retranscribe_with_segments(self):
         """Split existing recording into segments and transcribe incrementally"""
