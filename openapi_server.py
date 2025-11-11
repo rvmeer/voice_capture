@@ -16,6 +16,7 @@ import uvicorn
 # Import recording manager
 from recording_manager import RecordingManager
 from logging_config import get_logger
+from transcription_utils import remove_overlap
 
 # Setup logging
 logger = get_logger(__name__)
@@ -133,6 +134,7 @@ def get_transcription_text(recording_id: str) -> Optional[str]:
     rec_dir = RECORDINGS_DIR / f"recording_{recording_id}"
     transcription_file = rec_dir / f"transcription_{recording_id}.txt"
 
+    # Try to read the final transcription file
     if transcription_file.exists():
         try:
             with open(transcription_file, 'r', encoding='utf-8') as f:
@@ -140,6 +142,47 @@ def get_transcription_text(recording_id: str) -> Optional[str]:
         except Exception as e:
             logger.error(f"Error reading transcription file: {e}", exc_info=True)
             return None
+
+    # If no final transcription, try to combine segment transcriptions
+    segments_dir = rec_dir / "segments"
+    if segments_dir.exists():
+        try:
+            # Find all transcription files in segments folder (sorted by number)
+            transcription_files = sorted(segments_dir.glob("transcription_*.txt"))
+
+            if transcription_files:
+                logger.info(f"No final transcription found for {recording_id}, combining {len(transcription_files)} segment transcriptions")
+
+                # Read all segment transcriptions
+                segment_texts = []
+                for trans_file in transcription_files:
+                    try:
+                        with open(trans_file, 'r', encoding='utf-8') as f:
+                            text = f.read().strip()
+                            if text:
+                                segment_texts.append(text)
+                    except Exception as e:
+                        logger.error(f"Failed to read {trans_file}: {e}")
+
+                # Combine all texts with overlap removal
+                if segment_texts:
+                    combined_texts = []
+                    for i, text in enumerate(segment_texts):
+                        if i == 0:
+                            # First segment - add as-is
+                            combined_texts.append(text)
+                        else:
+                            # Remove overlap with previous segment
+                            previous_text = combined_texts[-1]
+                            deduplicated_text = remove_overlap(previous_text, text)
+                            if deduplicated_text.strip():
+                                combined_texts.append(deduplicated_text)
+
+                    final_transcription = " ".join(combined_texts)
+                    logger.info(f"Combined {len(segment_texts)} segment transcriptions with overlap removal ({len(final_transcription)} chars)")
+                    return final_transcription
+        except Exception as e:
+            logger.error(f"Error combining segment transcriptions: {e}", exc_info=True)
 
     # Fallback to JSON if TXT doesn't exist
     recording = get_recording_by_id(recording_id)

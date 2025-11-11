@@ -7,6 +7,9 @@ import json
 import wave
 from datetime import datetime, timedelta
 from pathlib import Path
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def seconds_to_iso_duration(seconds):
@@ -95,12 +98,12 @@ class RecordingManager:
                             recording = json.load(f)
                             self.recordings.append(recording)
                     except Exception as e:
-                        print(f"Error loading recording from {json_file}: {e}")
+                        logger.error(f"Error loading recording from {json_file}: {e}", exc_info=True)
 
-            print(f"DEBUG: Loaded {len(self.recordings)} recordings from subfolders")
+            logger.debug(f"Loaded {len(self.recordings)} recordings from subfolders")
 
         except Exception as e:
-            print(f"Error loading recordings: {e}")
+            logger.error(f"Error loading recordings: {e}", exc_info=True)
             self.recordings = []
 
     def save_recording(self, recording):
@@ -114,9 +117,9 @@ class RecordingManager:
             with open(json_file, 'w', encoding='utf-8') as f:
                 json.dump(recording, f, indent=2, ensure_ascii=False)
 
-            print(f"DEBUG: Saved recording to {json_file}")
+            logger.debug(f"Saved recording to {json_file}")
         except Exception as e:
-            print(f"Error saving recording: {e}")
+            logger.error(f"Error saving recording: {e}", exc_info=True)
 
     def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model="",
                       segment_duration=30, overlap_duration=15):
@@ -146,7 +149,7 @@ class RecordingManager:
                 duration = frames / float(rate)
                 return int(duration)
         except Exception as e:
-            print(f"Error getting audio duration: {e}")
+            logger.error(f"Error getting audio duration: {e}", exc_info=True)
             return 0
 
     def update_recording(self, recording_id, **kwargs):

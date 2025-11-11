@@ -23,6 +23,7 @@ from audio_recorder import AudioRecorder
 from recording_manager import RecordingManager, iso_duration_to_seconds, seconds_to_iso_duration
 from logging_config import setup_logging, get_logger
 from version import get_version_string
+from transcription_utils import remove_overlap
 
 # Setup logging
 logger = get_logger(__name__)
@@ -1212,43 +1213,6 @@ class TranscriptionApp(QMainWindow):
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
 
-    def remove_overlap(self, previous_text, new_text):
-        """Remove overlapping text between segments"""
-        if not previous_text or not new_text:
-            return new_text
-
-        # Split into words
-        prev_words = previous_text.split()
-        new_words = new_text.split()
-
-        # Look for overlap at the end of previous and beginning of new
-        # Check up to 50 words (covers ~15 seconds at normal speech rate)
-        max_overlap = min(50, len(prev_words), len(new_words))
-
-        best_overlap_length = 0
-        for overlap_len in range(max_overlap, 0, -1):
-            # Get last N words from previous text
-            prev_tail = prev_words[-overlap_len:]
-            # Get first N words from new text
-            new_head = new_words[:overlap_len]
-
-            # Calculate similarity (allow for some transcription variations)
-            matches = sum(1 for p, n in zip(prev_tail, new_head) if p.lower() == n.lower())
-            similarity = matches / overlap_len
-
-            # If 70% or more words match, consider it an overlap
-            if similarity >= 0.7:
-                best_overlap_length = overlap_len
-                logger.debug(f"Found overlap of {overlap_len} words with {similarity:.1%} similarity")
-                break
-
-        # Remove the overlapping portion from the new text
-        if best_overlap_length > 0:
-            deduplicated = " ".join(new_words[best_overlap_length:])
-            logger.debug(f"Removed {best_overlap_length} overlapping words")
-            return deduplicated
-        else:
-            return new_text
 
     def on_segment_transcribed(self, segment_text, segment_num):
         """Handle segment transcription completion"""
@@ -1335,7 +1299,7 @@ class TranscriptionApp(QMainWindow):
             else:
                 # Remove overlap with previous segment
                 previous_text = combined_texts[-1]
-                deduplicated_text = self.remove_overlap(previous_text, text)
+                deduplicated_text = remove_overlap(previous_text, text)
                 if deduplicated_text.strip():
                     combined_texts.append(deduplicated_text)
 
