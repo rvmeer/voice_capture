@@ -777,9 +777,21 @@ class TranscriptionApp(QMainWindow):
         def load_model():
             try:
                 logger.info(f"Starting to load Whisper {model_name} model...")
-                # Load model for CPU transcription
-                model = whisper.load_model(model_name, device="cpu")
-                logger.info(f"Whisper {model_name} model loaded successfully!")
+
+                # Detect best available device
+                if torch.cuda.is_available():
+                    device = "cuda"
+                    logger.info("Using CUDA (NVIDIA GPU) for Whisper inference")
+                elif torch.backends.mps.is_available():
+                    device = "mps"
+                    logger.info("Using MPS (Apple Silicon GPU) for Whisper inference")
+                else:
+                    device = "cpu"
+                    logger.info("Using CPU for Whisper inference")
+
+                # Load model on detected device
+                model = whisper.load_model(model_name, device=device)
+                logger.info(f"Whisper {model_name} model loaded successfully on {device}!")
 
                 # Cache the model
                 self.loaded_models[model_name] = model
