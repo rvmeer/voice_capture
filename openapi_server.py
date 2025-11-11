@@ -47,10 +47,12 @@ recording_manager = RecordingManager(recordings_dir=str(RECORDINGS_DIR))
 
 # Pydantic models for requests/responses
 class RecordingSummary(BaseModel):
+    model_config = {"json_schema_extra": {"example": {"id": "20251111_140000", "date": "2025-11-11 14:00:00", "name": "Recording Name", "duration": "PT42S"}}}
+
     id: str = Field(..., description="Recording ID (timestamp)")
     date: str = Field(..., description="Recording date and time")
     name: str = Field(..., description="Recording name")
-    duration: str = Field(..., description="Recording duration in ISO 8601 format")
+    duration: Optional[str] = Field(None, description="Recording duration in ISO 8601 format (absent during recording)")
 
 
 class RecordingDetail(BaseModel):
@@ -60,7 +62,7 @@ class RecordingDetail(BaseModel):
     date: str
     transcription: str
     summary: str
-    duration: str
+    duration: Optional[str] = None
     model: str
     segment_duration: int
     overlap_duration: int
@@ -213,6 +215,7 @@ async def root():
 @app.get(
     "/recordings",
     response_model=List[RecordingSummary],
+    response_model_exclude_none=True,
     summary="Get all recordings",
     description="Returns a list of all recordings with their basic metadata (id, date, name, duration)"
 )
@@ -222,12 +225,15 @@ async def get_recordings():
     result = []
 
     for rec in recordings:
-        result.append({
+        rec_data = {
             "id": rec.get("id"),
             "date": rec.get("date"),
-            "name": rec.get("name"),
-            "duration": rec.get("duration", "PT0S")
-        })
+            "name": rec.get("name")
+        }
+        # Only include duration if it exists in the recording
+        if "duration" in rec:
+            rec_data["duration"] = rec.get("duration")
+        result.append(rec_data)
 
     return result
 
@@ -235,6 +241,7 @@ async def get_recordings():
 @app.get(
     "/recordings/{recording_id}",
     response_model=RecordingDetail,
+    response_model_exclude_none=True,
     summary="Get recording details",
     description="Returns the complete metadata for a specific recording including all settings and information"
 )

@@ -924,7 +924,7 @@ class TranscriptionApp(QMainWindow):
             self.current_audio_file,
             self.current_recording_id,
             name=recording_name,
-            duration=0,  # Will be updated when recording stops
+            duration=None,  # Will be set when recording stops
             model=self.selected_model_name,
             segment_duration=self.segment_duration,
             overlap_duration=self.overlap_duration
@@ -1078,20 +1078,12 @@ class TranscriptionApp(QMainWindow):
         except:
             date_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Create JSON with all metadata
-        audio_file_path = str(rec_dir / f"recording_{self.current_recording_id}.wav")
-
-        # Add recording to manager (this will create the JSON file)
-        self.recording_manager.add_recording(
-            audio_file=audio_file_path,
-            timestamp=self.current_recording_id,
+        # Update recording with final metadata
+        self.recording_manager.update_recording(
+            self.current_recording_id,
             name=self.pending_recording_name,
             transcription=final_transcription,
-            summary="",
-            duration=duration_seconds,
-            model=self.selected_model_name,
-            segment_duration=self.segment_duration,
-            overlap_duration=self.overlap_duration
+            duration=duration_seconds
         )
 
         logger.info(f"Recording finalized: {self.pending_recording_name}")

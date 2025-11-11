@@ -210,12 +210,15 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         result = []
 
         for rec in recordings:
-            result.append({
+            rec_data = {
                 "id": rec.get("id"),
                 "date": rec.get("date"),
-                "name": rec.get("name"),
-                "duration": rec.get("duration", 0)
-            })
+                "name": rec.get("name")
+            }
+            # Only include duration if it exists in the recording
+            if "duration" in rec:
+                rec_data["duration"] = rec.get("duration")
+            result.append(rec_data)
 
         return [
             TextContent(

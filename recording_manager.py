@@ -121,7 +121,7 @@ class RecordingManager:
         except Exception as e:
             logger.error(f"Error saving recording: {e}", exc_info=True)
 
-    def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=0, model="",
+    def add_recording(self, audio_file, timestamp, name=None, transcription="", summary="", duration=None, model="",
                       segment_duration=30, overlap_duration=15):
         """Add a new recording with all settings"""
         recording = {
@@ -131,11 +131,15 @@ class RecordingManager:
             "date": datetime.strptime(timestamp, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S"),
             "transcription": transcription,
             "summary": summary,
-            "duration": seconds_to_iso_duration(duration),  # Duration in ISO 8601 format
             "model": model,  # Whisper model used for transcription
             "segment_duration": segment_duration,  # Segment length in seconds
             "overlap_duration": overlap_duration,  # Overlap length in seconds
         }
+
+        # Only add duration if it's provided (not None)
+        if duration is not None:
+            recording["duration"] = seconds_to_iso_duration(duration)  # Duration in ISO 8601 format
+
         self.recordings.insert(0, recording)  # Add to beginning
         self.save_recording(recording)
         return recording
