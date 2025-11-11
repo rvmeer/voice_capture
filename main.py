@@ -78,7 +78,7 @@ class TranscriptionApp(QMainWindow):
     transcription_complete = pyqtSignal(dict)
     summary_complete = pyqtSignal(str)
     model_loaded = pyqtSignal(str, object)  # (model_name, model_object)
-    segment_transcribed = pyqtSignal(str)  # Signal for incremental transcription updates
+    segment_transcribed = pyqtSignal(str, int)  # Signal for incremental transcription updates (text, segment_num)
 
     def __init__(self):
         super().__init__()
@@ -302,25 +302,15 @@ class TranscriptionApp(QMainWindow):
             self.tray_toggle_action.setText("Start Opname")
 
         # Save recording in background
-        def save_and_transcribe():
+        def save_and_continue():
             try:
                 self.current_audio_file, self.current_recording_id = self.recorder.stop_recording()
 
                 # Auto-generate name based on timestamp
                 recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
-                # Get audio duration
-                duration = self.recording_manager.get_audio_duration(self.current_audio_file)
-
-                # Update existing recording with final name and duration
-                self.recording_manager.update_recording(
-                    self.current_recording_id,
-                    name=recording_name,
-                    duration=duration
-                )
-
-                # Refresh list (disabled in tray-only mode)
-                # self.refresh_recording_list()
+                # Store the recording name for later use
+                self.pending_recording_name = recording_name
 
                 # Show notification
                 self.tray_icon.showMessage(
@@ -330,14 +320,15 @@ class TranscriptionApp(QMainWindow):
                     2000
                 )
 
-                # Start transcription in background
-                self.transcribe_audio()
+                # Wait for all segments to be transcribed, then finalize
+                logger.info(f"Recording stopped (tray mode), waiting for all segments to be transcribed...")
+                self.check_and_finalize_recording()
 
             except Exception as e:
-                logger.error(f"Error in tray save_and_transcribe: {e}", exc_info=True)
+                logger.error(f"Error in tray save_and_continue: {e}", exc_info=True)
 
         # Delay the save operation to let audio thread cleanup
-        QTimer.singleShot(100, save_and_transcribe)
+        QTimer.singleShot(100, save_and_continue)
 
     def init_ui(self):
         """Initialize the user interface"""
@@ -1175,11 +1166,11 @@ class TranscriptionApp(QMainWindow):
                         # Minimum 0.1 seconds of audio required
                         if duration < 0.1:
                             logger.warning(f"Segment {segment_num} too short ({duration:.2f}s), skipping transcription")
-                            self.segment_transcribed.emit("")  # Emit empty text
+                            self.segment_transcribed.emit("", segment_num)  # Emit empty text with segment number
                             return
                 except Exception as audio_check_error:
                     logger.error(f"Error checking audio duration for segment {segment_num}: {audio_check_error}")
-                    self.segment_transcribed.emit("")  # Emit empty text on error
+                    self.segment_transcribed.emit("", segment_num)  # Emit empty text on error with segment number
                     return
 
                 # Use torch.no_grad() to prevent gradient computation and cache issues
@@ -1210,13 +1201,13 @@ class TranscriptionApp(QMainWindow):
                 segment_text = result.get('text', '').strip()
                 logger.debug(f"Segment {segment_num} transcribed: {segment_text[:50]}...")
 
-                # Emit signal with transcribed text
-                self.segment_transcribed.emit(segment_text)
+                # Emit signal with transcribed text and segment number
+                self.segment_transcribed.emit(segment_text, segment_num)
 
             except Exception as e:
                 logger.error(f"Error transcribing segment {segment_num}: {e}", exc_info=True)
                 # Emit empty text so the JSON still gets updated
-                self.segment_transcribed.emit("")
+                self.segment_transcribed.emit("", segment_num)
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
@@ -1259,24 +1250,22 @@ class TranscriptionApp(QMainWindow):
         else:
             return new_text
 
-    def on_segment_transcribed(self, segment_text):
+    def on_segment_transcribed(self, segment_text, segment_num):
         """Handle segment transcription completion"""
-        logger.debug("on_segment_transcribed called")
+        logger.debug(f"on_segment_transcribed called for segment {segment_num}")
 
         # Store segment transcription with its number
-        # We keep track of which segment this is
-        current_segment_num = len(self.transcribed_segments)
         self.transcribed_segments.append(segment_text)
 
-        # Save individual segment transcription to file
-        if self.current_recording_id and segment_text.strip():
+        # Save individual segment transcription to file (even if empty, to maintain numbering)
+        if self.current_recording_id:
             try:
                 rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
                 segments_dir = rec_dir / "segments"
                 segments_dir.mkdir(parents=True, exist_ok=True)
 
-                # Write individual segment transcription file
-                segment_transcription_file = segments_dir / f"transcription_{current_segment_num:03d}.txt"
+                # Write individual segment transcription file using the actual segment number
+                segment_transcription_file = segments_dir / f"transcription_{segment_num:03d}.txt"
                 with open(segment_transcription_file, 'w', encoding='utf-8') as f:
                     f.write(segment_text)
 
@@ -1289,7 +1278,7 @@ class TranscriptionApp(QMainWindow):
         if hasattr(self, 'transcription_text'):
             self.transcription_text.setPlainText(full_text)
 
-        logger.debug(f"Segment {current_segment_num} transcribed ({len(self.transcribed_segments)} total segments)")
+        logger.debug(f"Segment {segment_num} transcribed ({len(self.transcribed_segments)} total segments)")
 
         # Mark as not transcribing and process next segment
         self.is_transcribing_segment = False
