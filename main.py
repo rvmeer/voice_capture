@@ -2103,11 +2103,14 @@ class TranscriptionApp(QMainWindow):
             recording_name = recording.get('name', recording_id)
             recording_date = recording.get('date', '')
             duration = recording.get('duration', '')
+            current_model = recording.get('model', '')
 
             # Format display text
             display_text = f"{recording_name} - {recording_date}"
             if duration:
                 display_text += f" ({duration})"
+            if current_model:
+                display_text += f" [model: {current_model}]"
 
             item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, recording_id)
