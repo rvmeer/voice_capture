@@ -103,9 +103,6 @@ class VoiceCapture(QObject):
         self.transcribed_segments = []  # List of transcribed texts
         self.is_transcribing_segment = False  # Flag to track if currently transcribing
 
-        # Track retranscription metadata
-        self.retranscribe_metadata = None  # Metadata for retranscription (if any)
-
         # Track pending recording name (set when recording stops)
         self.pending_recording_name = None
 
@@ -823,141 +820,96 @@ class VoiceCapture(QObject):
         self.pending_recording_name = None
 
     def start_retranscription(self, recording_id):
-        """Start retranscription of a recording"""
-        logger.info(f"Starting retranscription of recording {recording_id}")
+        """Start retranscription of a recording using the full audio file"""
+        logger.info(f"Starting retranscription of recording {recording_id} with model {self.selected_model_name}")
 
         # Get recording metadata
         recording = self.recording_manager.get_recording(recording_id)
         if not recording:
             logger.error(f"Recording {recording_id} not found")
+            QMessageBox.warning(None, "Fout", "Opname niet gevonden.")
             return
 
-        # Store metadata for retranscription
-        self.retranscribe_metadata = {
-            'recording_id': recording_id,
-            'name': recording.get('name'),
-            'segment_duration': recording.get('segment_duration', 10),
-            'overlap_duration': recording.get('overlap_duration', 5)
-        }
-
-        # Set current recording ID
-        self.current_recording_id = recording_id
-
-        # Clear segments queue
-        self.segments_to_transcribe = []
-        self.transcribed_segments = []
-
-        # Find all segment WAV files
+        # Find the main audio file
         rec_dir = self.base_recordings_dir / f"recording_{recording_id}"
-        segments_dir = rec_dir / "segments"
+        audio_file = rec_dir / f"recording_{recording_id}.wav"
 
-        if not segments_dir.exists():
-            logger.error(f"Segments directory not found for recording {recording_id}")
-            QMessageBox.warning(None, "Fout", "Geen segmenten gevonden voor deze opname.")
+        if not audio_file.exists():
+            logger.error(f"Audio file not found for recording {recording_id}")
+            QMessageBox.warning(None, "Fout", "Audio bestand niet gevonden voor deze opname.")
             return
 
-        segment_files = sorted(segments_dir.glob("segment_*.wav"))
-
-        if not segment_files:
-            logger.error(f"No segment files found for recording {recording_id}")
-            QMessageBox.warning(None, "Fout", "Geen segment bestanden gevonden voor deze opname.")
-            return
-
-        # Add all segments to queue as tuples (segment_file, segment_num)
-        for segment_file in segment_files:
-            segment_num = int(segment_file.stem.split('_')[1])
-            self.segments_to_transcribe.append((str(segment_file), segment_num))
-
-        logger.info(f"Added {len(segment_files)} segments to retranscription queue")
+        # Set current recording ID for retranscription
+        self.current_recording_id = recording_id
 
         # Show notification
         if hasattr(self, 'tray_icon'):
             self.tray_icon.showMessage(
                 "Hertranscriptie Gestart",
-                f"Hertranscriberen van {len(segment_files)} segmenten...",
+                f"Hertranscriberen met {self.selected_model_name} model...",
                 QSystemTrayIcon.MessageIcon.Information,
                 2000
             )
 
-        # Start transcribing
-        self.transcribe_next_segment()
-
-        # Monitor progress and finalize when done
-        self.check_retranscription_progress()
-
-    def check_retranscription_progress(self):
-        """Check retranscription progress and finalize when done"""
-        if not self.retranscribe_metadata:
-            return
-
-        # Check if all segments are transcribed
-        if not self.is_transcribing_segment and not self.segments_to_transcribe:
-            logger.info("Retranscription complete - finalizing")
-            self.finalize_retranscription()
-        else:
-            # Check again in 1 second
-            QTimer.singleShot(1000, self.check_retranscription_progress)
-
-    def finalize_retranscription(self):
-        """Finalize retranscription"""
-        if not self.retranscribe_metadata:
-            return
-
-        recording_id = self.retranscribe_metadata['recording_id']
-        logger.info(f"Finalizing retranscription of {recording_id}")
-
-        rec_dir = self.base_recordings_dir / f"recording_{recording_id}"
-        segments_dir = rec_dir / "segments"
-
-        # Combine all transcriptions with overlap removal
-        transcription_files = sorted(segments_dir.glob("transcription_*.txt"))
-        combined_texts = []
-
-        for trans_file in transcription_files:
+        # Start transcription in background thread
+        def retranscribe_worker():
             try:
-                with open(trans_file, 'r', encoding='utf-8') as f:
-                    text = f.read().strip()
-                    if text:
-                        if len(combined_texts) == 0:
-                            # First segment - add as-is
-                            combined_texts.append(text)
-                        else:
-                            # Remove overlap with previous segment
-                            previous_text = combined_texts[-1]
-                            deduplicated_text = remove_overlap(previous_text, text)
-                            if deduplicated_text.strip():
-                                combined_texts.append(deduplicated_text)
+                # Get the model
+                model_name = self.selected_model_name
+                if model_name not in self.loaded_models:
+                    logger.error(f"Model {model_name} not loaded yet")
+                    QMessageBox.warning(None, "Fout", f"Model {model_name} is nog niet geladen. Probeer later opnieuw.")
+                    return
+
+                model = self.loaded_models[model_name]
+                logger.info(f"Transcribing full audio file {audio_file} with {model_name} model...")
+
+                # Transcribe the full audio file
+                result = model.transcribe(
+                    str(audio_file),
+                    language="nl",
+                    task="transcribe",
+                    fp16=False,
+                    verbose=False
+                )
+
+                transcription_text = result["text"].strip()
+                logger.info(f"Retranscription complete: {len(transcription_text)} chars")
+
+                # Save new transcription to file
+                transcription_file = rec_dir / f"transcription_{recording_id}.txt"
+                with open(transcription_file, 'w', encoding='utf-8') as f:
+                    f.write(transcription_text)
+
+                # Update recording metadata with new transcription and model
+                self.recording_manager.update_recording(
+                    recording_id,
+                    transcription=transcription_text,
+                    model=model_name
+                )
+
+                logger.info(f"Updated recording {recording_id} with new transcription and model {model_name}")
+
+                # Show completion notification
+                if hasattr(self, 'tray_icon'):
+                    self.tray_icon.showMessage(
+                        "Hertranscriptie Voltooid",
+                        f"Opname hertranscribeerd met {model_name}: {len(transcription_text)} tekens",
+                        QSystemTrayIcon.MessageIcon.Information,
+                        3000
+                    )
+
             except Exception as e:
-                logger.error(f"Error reading transcription file {trans_file}: {e}")
+                logger.error(f"Error during retranscription: {e}", exc_info=True)
+                QMessageBox.critical(None, "Fout", f"Fout bij hertranscriberen: {str(e)}")
+            finally:
+                # Reset current recording ID
+                self.current_recording_id = None
 
-        final_transcription = " ".join(combined_texts)
-
-        # Save final transcription
-        transcription_file = rec_dir / f"transcription_{recording_id}.txt"
-        with open(transcription_file, 'w', encoding='utf-8') as f:
-            f.write(final_transcription)
-
-        # Update recording metadata
-        self.recording_manager.update_recording(
-            recording_id,
-            transcription=final_transcription,
-            model=self.selected_model_name
-        )
-
-        logger.info(f"Retranscription finalized: {len(final_transcription)} chars")
-
-        # Show notification
-        if hasattr(self, 'tray_icon'):
-            self.tray_icon.showMessage(
-                "Hertranscriptie Voltooid",
-                f"Opname hertranscribeerd: {len(final_transcription)} tekens",
-                QSystemTrayIcon.MessageIcon.Information,
-                3000
-            )
-
-        # Reset state
-        self.retranscribe_metadata = None
-        self.current_recording_id = None
+        # Start worker thread
+        thread = threading.Thread(target=retranscribe_worker)
+        thread.daemon = True
+        thread.start()
 
     # Model loading
 
