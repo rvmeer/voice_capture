@@ -24,6 +24,7 @@ from recording_manager import RecordingManager, iso_duration_to_seconds, seconds
 from logging_config import setup_logging, get_logger
 from version import get_version_string
 from transcription_utils import remove_overlap
+from tray_actions import TrayActions
 
 # Setup logging
 logger = get_logger(__name__)
@@ -72,8 +73,8 @@ def create_tray_icon(recording=False):
     return QIcon(pixmap)
 
 
-class TranscriptionApp(QMainWindow):
-    """Main application window"""
+class TranscriptionApp(TrayActions, QMainWindow):
+    """Main application - tray-only mode with window support (currently disabled)"""
 
     # Define signals for thread-safe communication
     transcription_complete = pyqtSignal(dict)
