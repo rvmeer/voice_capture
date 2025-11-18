@@ -4,12 +4,12 @@ Docker image voor het draaien van het `recordings.py` CLI script op NVIDIA GPU's
 
 ## Base Image
 
-- **Image**: `nvidia/cuda:12.4.0-base-ubuntu22.04`
+- **Image**: `nvcr.io/nvidia/pytorch:24.10-py3`
 - **Platform**: Linux ARM64 (NVIDIA DGX Spark compatible)
-- **CUDA**: Version 12.4
-- **PyTorch**: Nightly build with CUDA 12.4 support via pip
+- **CUDA**: Version 12.x
+- **PyTorch**: Pre-installed from NVIDIA NGC container
 
-**Note**: We use PyTorch nightly build to support the NVIDIA GB10 (Blackwell) GPU which has compute capability sm_121. Standard PyTorch releases only support up to sm_90a (Hopper). The GB10 GPU in the DGX Spark requires the latest PyTorch builds.
+**Note**: The DGX Spark has an NVIDIA GB10 (Blackwell) GPU with compute capability sm_121. This is very new hardware that may not be fully supported by all PyTorch versions. Some operations might fall back to CPU if the GPU architecture is too new for the PyTorch build. NVIDIA's NGC containers have the best ARM64 + CUDA support available.
 
 ## Bouwen
 

@@ -93,6 +93,17 @@ def test_architecture():
         device = "cuda"
         logger.info(f"  Selected device: {device}")
         logger.info(f"  Reason: CUDA is available (highest priority)")
+
+        # Check for compute capability issues
+        if torch.cuda.device_count() > 0:
+            capability = torch.cuda.get_device_capability(0)
+            capability_str = f"sm_{capability[0]}{capability[1]}"
+            logger.info(f"  Note: GPU compute capability is {capability_str}")
+
+            # Warn if capability might not be fully supported
+            if capability[0] >= 12:  # Blackwell and newer
+                logger.warning(f"  Warning: GPU has very new architecture ({capability_str})")
+                logger.warning(f"  Some PyTorch operations might fall back to CPU if not supported")
     elif torch.backends.mps.is_available():
         device = "mps"
         logger.info(f"  Selected device: {device}")

@@ -1,27 +1,19 @@
-# Use NVIDIA CUDA base image for ARM64
-FROM nvidia/cuda:12.4.0-base-ubuntu22.04
+# Use NVIDIA PyTorch NGC container for ARM64 with CUDA support
+# This container has PyTorch pre-built for ARM64 with CUDA
+FROM nvcr.io/nvidia/pytorch:24.10-py3
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install additional system dependencies
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
     ffmpeg \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create symlink for python
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
-# Upgrade pip
+# Note: PyTorch is already installed in the base image with CUDA support
+# We'll upgrade to a version that supports GB10 if needed
 RUN pip install --upgrade pip
-
-# Install PyTorch with CUDA support for ARM64
-# Using nightly build for Blackwell (GB10) support (sm_121)
-# Standard PyTorch only supports up to sm_90a (Hopper)
-RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu124
 
 # Copy Python requirements (Docker-specific)
 COPY requirements-docker.txt .
