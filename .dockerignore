@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Application specific
+main.py
+main_old.py
+tray_actions.py
+audio_recorder.py
+*.app/
+*.dmg
+*.spec
+build_app.sh
+icon.icns
+icon.iconset/
+
+# Local data (we'll mount this as a volume)
+*.wav
+*.mp3
+*.json
+logs/
+
+# Testing
+test_*.py
+!test_architecture.py
+
+# Documentation
+README.md
+*.md
+
+# Docker
+Dockerfile
+.dockerignore

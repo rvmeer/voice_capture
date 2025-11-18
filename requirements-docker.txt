@@ -1,0 +1,25 @@
+# Docker-specific requirements for Voice Capture CLI
+# Note: PyTorch is provided by the NVIDIA base image (nvcr.io/nvidia/pytorch:25.10-py3)
+
+# Whisper for speech recognition
+openai-whisper
+
+# Numerical computing (may already be in base image, but included for safety)
+numpy
+
+# Optional: Transformers and audio processing
+transformers
+pyannote.audio
+
+# API servers (for MCP/OpenAPI servers)
+fastapi
+uvicorn[standard]
+pydantic
+
+# MCP server
+mcp
+
+# Note: The following are NOT included in Docker:
+# - torch (provided by base image with CUDA support)
+# - PyQt6 (GUI not needed in Docker)
+# - pyaudio (audio recording not needed for CLI-only usage)
