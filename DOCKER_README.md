@@ -4,10 +4,12 @@ Docker image voor het draaien van het `recordings.py` CLI script op NVIDIA GPU's
 
 ## Base Image
 
-- **Image**: `nvcr.io/nvidia/pytorch:25.10-py3`
+- **Image**: `nvidia/cuda:12.4.0-base-ubuntu22.04`
 - **Platform**: Linux ARM64 (NVIDIA DGX Spark compatible)
-- **CUDA**: Fully supported
-- **PyTorch**: Pre-installed with CUDA support
+- **CUDA**: Version 12.4
+- **PyTorch**: Installed with CUDA 12.4 support via pip
+
+**Note**: We use the CUDA base image and install PyTorch separately to ensure CUDA support on ARM64. The official NVIDIA PyTorch images sometimes have CPU-only builds for ARM64.
 
 ## Bouwen
 
