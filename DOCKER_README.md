@@ -7,9 +7,9 @@ Docker image voor het draaien van het `recordings.py` CLI script op NVIDIA GPU's
 - **Image**: `nvidia/cuda:12.4.0-base-ubuntu22.04`
 - **Platform**: Linux ARM64 (NVIDIA DGX Spark compatible)
 - **CUDA**: Version 12.4
-- **PyTorch**: Installed with CUDA 12.4 support via pip
+- **PyTorch**: Nightly build with CUDA 12.4 support via pip
 
-**Note**: We use the CUDA base image and install PyTorch separately to ensure CUDA support on ARM64. The official NVIDIA PyTorch images sometimes have CPU-only builds for ARM64.
+**Note**: We use PyTorch nightly build to support the NVIDIA GB10 (Blackwell) GPU which has compute capability sm_121. Standard PyTorch releases only support up to sm_90a (Hopper). The GB10 GPU in the DGX Spark requires the latest PyTorch builds.
 
 ## Bouwen
 

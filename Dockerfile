@@ -19,8 +19,9 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN pip install --upgrade pip
 
 # Install PyTorch with CUDA support for ARM64
-# Using pip install with CUDA 12.4 support
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# Using nightly build for Blackwell (GB10) support (sm_121)
+# Standard PyTorch only supports up to sm_90a (Hopper)
+RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu124
 
 # Copy Python requirements (Docker-specific)
 COPY requirements-docker.txt .
