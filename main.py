@@ -1000,7 +1000,7 @@ def main():
     # Install a timer to allow Python to process signals
     # Qt event loop blocks Python signal handlers, so we need to wake up periodically
     timer = QTimer()
-    timer.start(500)  # Wake up every 500ms to allow signal processing
+    timer.start(5000)  # Wake up every 5 seconds to allow signal processing (reduced CPU usage)
     timer.timeout.connect(lambda: None)  # Do nothing, just process signals
 
     # Run the application

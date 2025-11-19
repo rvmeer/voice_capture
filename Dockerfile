@@ -1,19 +1,29 @@
-# Use NVIDIA PyTorch NGC container for ARM64 with CUDA support
-# This container has PyTorch pre-built for ARM64 with CUDA
-FROM nvcr.io/nvidia/pytorch:24.10-py3
+# Use Ubuntu base with Python
+# Note: NVIDIA NGC PyTorch containers for ARM64 only have CPU support
+# For GPU support on ARM64, PyTorch needs to be compiled from source (very slow)
+# This Dockerfile uses CPU-only PyTorch which is stable and works everywhere
+FROM ubuntu:22.04
 
 # Set working directory
 WORKDIR /app
 
-# Install additional system dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
     ffmpeg \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Note: PyTorch is already installed in the base image with CUDA support
-# We'll upgrade to a version that supports GB10 if needed
+# Create symlink for python
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
+# Upgrade pip
 RUN pip install --upgrade pip
+
+# Install PyTorch (CPU version - stable and fast to install)
+# For ARM64 CUDA support, see Dockerfile.source (requires compilation)
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # Copy Python requirements (Docker-specific)
 COPY requirements-docker.txt .

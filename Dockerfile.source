@@ -1,0 +1,68 @@
+# Alternative Dockerfile: Build PyTorch from source with CUDA support for ARM64
+# This takes longer to build but guarantees CUDA support
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
+
+# Set working directory
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-dev \
+    git \
+    cmake \
+    ninja-build \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlink for python
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# Install PyTorch build dependencies
+RUN pip install numpy pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
+
+# Clone and build PyTorch from source (this will take a while)
+# Using a specific version tag for stability
+ENV PYTORCH_VERSION=v2.1.2
+ENV TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0"
+
+RUN git clone --recursive --branch ${PYTORCH_VERSION} https://github.com/pytorch/pytorch.git /pytorch && \
+    cd /pytorch && \
+    export USE_CUDA=1 && \
+    export USE_CUDNN=1 && \
+    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all" && \
+    python setup.py install
+
+# Install torchvision and torchaudio (simpler, can use pip)
+RUN pip install torchvision torchaudio --no-deps
+
+# Copy Python requirements (Docker-specific)
+COPY requirements-docker.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements-docker.txt
+
+# Copy application files
+COPY logging_config.py .
+COPY recording_manager.py .
+COPY transcription_utils.py .
+COPY recordings.py .
+COPY test_architecture.py .
+
+# Make scripts executable
+RUN chmod +x recordings.py test_architecture.py
+
+# Create volume mount point for recordings
+VOLUME ["/data/VoiceCapture"]
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV RECORDINGS_DIR=/data/VoiceCapture
+
+# Default command - show help
+CMD ["python", "recordings.py", "--help"]
