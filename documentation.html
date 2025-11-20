@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Capture - Technische Documentatie</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        nav {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 2px solid #e9ecef;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        nav ul {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+        }
+        
+        nav a {
+            color: #667eea;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        
+        nav a:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        main {
+            padding: 40px;
+        }
+        
+        section {
+            margin-bottom: 50px;
+            scroll-margin-top: 80px;
+        }
+        
+        h2 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+        
+        h3 {
+            color: #764ba2;
+            font-size: 1.5em;
+            margin: 25px 0 15px 0;
+        }
+        
+        h4 {
+            color: #555;
+            font-size: 1.2em;
+            margin: 20px 0 10px 0;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .feature-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 12px rgba(0,0,0,0.15);
+        }
+        
+        .feature-card h4 {
+            color: #667eea;
+            margin-top: 0;
+        }
+        
+        .architecture-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+        
+        .component-flow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 20px 0;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .component {
+            background: white;
+            border: 2px solid #667eea;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-weight: 500;
+            color: #667eea;
+            min-width: 150px;
+            text-align: center;
+        }
+        
+        .arrow {
+            font-size: 2em;
+            color: #764ba2;
+            font-weight: bold;
+        }
+        
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+            margin: 15px 0;
+        }
+        
+        .workflow-step {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 6px;
+            transition: all 0.3s;
+        }
+        
+        .workflow-step:hover {
+            border-left-color: #764ba2;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        
+        .workflow-step strong {
+            color: #667eea;
+            font-size: 1.1em;
+        }
+        
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+        
+        .success-box {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+        
+        ul, ol {
+            margin: 15px 0 15px 30px;
+        }
+        
+        li {
+            margin: 8px 0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .tech-stack {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        
+        .tech-badge {
+            background: #667eea;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+        
+        footer {
+            background: #2d2d2d;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .emoji {
+            font-size: 1.2em;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            main {
+                padding: 20px;
+            }
+            
+            header h1 {
+                font-size: 2em;
+            }
+            
+            .component-flow {
+                flex-direction: column;
+            }
+            
+            .arrow {
+                transform: rotate(90deg);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ Voice Capture</h1>
+            <p>Technische Documentatie & Architectuur Overzicht</p>
+        </header>
+        
+        <nav>
+            <ul>
+                <li><a href="#overview">Overzicht</a></li>
+                <li><a href="#features">Functionaliteiten</a></li>
+                <li><a href="#architecture">Architectuur</a></li>
+                <li><a href="#workflow">Workflow</a></li>
+                <li><a href="#components">Componenten</a></li>
+                <li><a href="#tech-stack">Tech Stack</a></li>
+                <li><a href="#api">API</a></li>
+            </ul>
+        </nav>
+        
+        <main>
+            <section id="overview">
+                <h2>📋 Overzicht</h2>
+                <p>Voice Capture is een professionele cross-platform desktop applicatie voor audio-opname en automatische transcriptie. De applicatie draait volledig in de system tray en maakt gebruik van OpenAI's Whisper model voor hoge-kwaliteit spraak-naar-tekst conversie.</p>
+                
+                <div class="info-box">
+                    <strong>🎯 Doelstellingen:</strong>
+                    <ul>
+                        <li>Eenvoudige one-click audio opname zonder GUI overhead</li>
+                        <li>Automatische real-time transcriptie tijdens opname</li>
+                        <li>Flexibele model selectie voor balans tussen snelheid en kwaliteit</li>
+                        <li>Cross-platform ondersteuning (macOS, Windows, Linux)</li>
+                        <li>API toegang voor integratie met andere tools</li>
+                    </ul>
+                </div>
+                
+                <h3>Ondersteunde Platforms</h3>
+                <div class="tech-stack">
+                    <span class="tech-badge">🍎 macOS</span>
+                    <span class="tech-badge">🪟 Windows</span>
+                    <span class="tech-badge">🐧 Linux</span>
+                </div>
+            </section>
+            
+            <section id="features">
+                <h2>✨ Functionaliteiten</h2>
+                
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4>🎤 One-Click Recording</h4>
+                        <p>Start en stop opnames met één enkele klik op het tray icoon. Geen complexe GUI, alleen wat je nodig hebt.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>📝 Live Transcriptie</h4>
+                        <p>Incrementele transcriptie tijdens opname met segmented processing. Real-time feedback tijdens het opnemen.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>🧠 Meerdere Whisper Modellen</h4>
+                        <p>Keuze uit Tiny, Small, Medium en Large modellen. Balanceer tussen snelheid en nauwkeurigheid.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>🎚️ Audio Input Selectie</h4>
+                        <p>Kies je microfoon of audio invoer apparaat via het tray menu. Ondersteunt alle systeem audio devices.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>💾 Auto-Save</h4>
+                        <p>Automatisch opslaan met timestamp. Geen dialogen, geen interruptions, gewoon werken.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>🗑️ Smart Cleanup</h4>
+                        <p>Automatische detectie en verwijdering van lege of te korte opnames. Houdt je opslag schoon.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>⚡ Model Caching</h4>
+                        <p>Geladen modellen blijven in geheugen voor snellere transcriptie. Geen wachttijden bij herhaald gebruik.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>🌐 FastAPI Server</h4>
+                        <p>Volledige REST API voor toegang tot opnames, transcripties en metadata. Integreer met andere tools.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>🔄 Hertranscriptie</h4>
+                        <p>Hertranscribeer bestaande opnames met een ander model. Experimenteer met verschillende kwaliteitsniveaus.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>🇳🇱 Nederlandse Taal</h4>
+                        <p>Geoptimaliseerd voor Nederlands met native language support in Whisper.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>📊 Segment Overlap</h4>
+                        <p>10-seconden segmenten met 5-seconden overlap voor naadloze transcriptie zonder context verlies.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h4>🤖 Claude MCP Integratie</h4>
+                        <p>Model Context Protocol server voor integratie met Claude Desktop.</p>
+                    </div>
+                </div>
+                
+                <h3>Whisper Model Opties</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Grootte</th>
+                            <th>Snelheid</th>
+                            <th>Kwaliteit</th>
+                            <th>Gebruik</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Tiny</strong></td>
+                            <td>~1 GB</td>
+                            <td>⚡⚡⚡⚡⚡</td>
+                            <td>⭐⭐</td>
+                            <td>Snelle drafts, real-time feedback</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Small</strong></td>
+                            <td>~2 GB</td>
+                            <td>⚡⚡⚡⚡</td>
+                            <td>⭐⭐⭐</td>
+                            <td>Dagelijks gebruik, goede balans</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Medium</strong></td>
+                            <td>~5 GB</td>
+                            <td>⚡⚡⚡</td>
+                            <td>⭐⭐⭐⭐</td>
+                            <td>Default, professionele kwaliteit</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Large</strong></td>
+                            <td>~10 GB</td>
+                            <td>⚡⚡</td>
+                            <td>⭐⭐⭐⭐⭐</td>
+                            <td>Hoogste kwaliteit, belangrijke opnames</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            
+            <section id="architecture">
+                <h2>🏗️ Architectuur</h2>
+                
+                <h3>Systeem Overzicht</h3>
+                <div class="component-flow">
+                    <div class="component">System Tray UI<br/>(PyQt6)</div>
+                    <span class="arrow">→</span>
+                    <div class="component">Voice Capture<br/>(Core)</div>
+                    <span class="arrow">→</span>
+                    <div class="component">Audio Recorder<br/>(PyAudio)</div>
+                </div>
+                
+                <div class="component-flow">
+                    <div class="component">Recording Manager<br/>(Storage)</div>
+                    <span class="arrow">↔</span>
+                    <div class="component">Voice Capture<br/>(Core)</div>
+                    <span class="arrow">↔</span>
+                    <div class="component">Whisper Model<br/>(Transcription)</div>
+                </div>
+                
+                <div class="component-flow">
+                    <div class="component">FastAPI Server<br/>(REST API)</div>
+                    <span class="arrow">→</span>
+                    <div class="component">Recording Manager<br/>(Data Access)</div>
+                </div>
+                
+                <h3>Design Patterns</h3>
+                <div class="architecture-box">
+                    <h4>Composition Pattern</h4>
+                    <p>De applicatie gebruikt composition in plaats van inheritance. De <code>VoiceCapture</code> class composeert functionaliteit van <code>AudioRecorder</code> en <code>RecordingManager</code> zonder van hen te erven.</p>
+                </div>
+                
+                <div class="architecture-box">
+                    <h4>Signal-Slot Pattern (Qt)</h4>
+                    <p>Thread-safe communicatie tussen background threads en UI thread via PyQt6 signals en slots. Voorkomt race conditions en UI blocking.</p>
+                </div>
+                
+                <div class="architecture-box">
+                    <h4>Callback Pattern</h4>
+                    <p>AudioRecorder gebruikt callbacks voor segment processing, waardoor real-time verwerking mogelijk is zonder tight coupling.</p>
+                </div>
+                
+                <div class="architecture-box">
+                    <h4>Lazy Loading</h4>
+                    <p>Whisper modellen worden asynchroon geladen en gecached. Alleen geselecteerde modellen worden in geheugen gehouden.</p>
+                </div>
+            </section>
+            
+            <section id="workflow">
+                <h2>🔄 Workflow & Processing Pipeline</h2>
+                
+                <h3>Opname Workflow</h3>
+                
+                <div class="workflow-step">
+                    <strong>1. Start Opname</strong>
+                    <p>Gebruiker klikt op tray icoon → <code>tray_toggle_recording()</code> wordt aangeroepen</p>
+                    <ul>
+                        <li>Check of er al een opname bezig is</li>
+                        <li>Tray icoon verandert naar "recording" state (rood)</li>
+                        <li>Timer start voor duration tracking</li>
+                        <li>Roep <code>recorder.start_recording()</code> aan met segment callback</li>
+                    </ul>
+                </div>
+                
+                <div class="workflow-step">
+                    <strong>2. Audio Capture</strong>
+                    <p>PyAudio stream leest audio data van microfoon in chunks van 1024 samples</p>
+                    <ul>
+                        <li>Sample rate: 16kHz (optimaal voor Whisper)</li>
+                        <li>Format: 16-bit PCM</li>
+                        <li>Channels: Mono (1 channel)</li>
+                        <li>Alle frames worden opgeslagen voor complete recording</li>
+                    </ul>
+                </div>
+                
+                <div class="workflow-step">
+                    <strong>3. Segment Creation</strong>
+                    <p>Elke 10 seconden wordt een segment gecreëerd met 5 seconden overlap</p>
+                    <ul>
+                        <li>Segment wordt als WAV bestand opgeslagen in <code>segments/</code> folder</li>
+                        <li>Callback functie wordt aangeroepen met segment path</li>
+                        <li>Segment nummer wordt geïncrementeerd</li>
+                        <li>Overlap frames worden behouden voor volgend segment</li>
+                    </ul>
+                </div>
+                
+                <div class="workflow-step">
+                    <strong>4. Transcriptie (Per Segment)</strong>
+                    <p>Segment wordt in background thread getranscribeerd</p>
+                    <ul>
+                        <li>Check segment duration (minimum 0.1 seconden)</li>
+                        <li>Laad geselecteerd Whisper model (of gebruik gecached model)</li>
+                        <li>Transcribeer met <code>language="nl"</code> en <code>fp16=False</code></li>
+                        <li>Sla transcriptie op als <code>transcription_N.txt</code></li>
+                        <li>Emit signal met getranscribeerde tekst</li>
+                    </ul>
+                </div>
+                
+                <div class="workflow-step">
+                    <strong>5. Stop Opname</strong>
+                    <p>Gebruiker klikt nogmaals op tray icoon → <code>tray_stop_recording()</code></p>
+                    <ul>
+                        <li>Stop audio stream en timer</li>
+                        <li>Sla complete audio op als WAV bestand</li>
+                        <li>Tray icoon terug naar idle state (wit)</li>
+                        <li>Genereer opname naam met timestamp</li>
+                        <li>Start <code>check_and_finalize_recording()</code></li>
+                    </ul>
+                </div>
+                
+                <div class="workflow-step">
+                    <strong>6. Finalisatie</strong>
+                    <p>Wacht tot alle segmenten getranscribeerd zijn</p>
+                    <ul>
+                        <li>Poll elke seconde of alle transcriptie bestanden aanwezig zijn</li>
+                        <li>Combineer alle segment transcripties</li>
+                        <li>Verwijder overlap tussen segmenten met <code>remove_overlap()</code></li>
+                        <li>Check of finale transcriptie leeg is</li>
+                    </ul>
+                </div>
+                
+                <div class="workflow-step">
+                    <strong>7. Opslag & Cleanup</strong>
+                    <p>Afhankelijk van transcriptie resultaat:</p>
+                    <ul>
+                        <li><strong>Als transcriptie leeg is:</strong> Verwijder volledige recording folder + notificatie "Opname Leeg"</li>
+                        <li><strong>Als transcriptie aanwezig is:</strong> Sla metadata op in JSON + update RecordingManager + notificatie "Opname Voltooid"</li>
+                    </ul>
+                </div>
+                
+                <h3>Overlap Removal Algoritme</h3>
+                <div class="architecture-box">
+                    <p>Om dubbele tekst tussen segmenten te voorkomen:</p>
+                    <ol>
+                        <li>Splits beide transcripties in woorden</li>
+                        <li>Vergelijk laatste N woorden van vorig segment met eerste N woorden van nieuw segment</li>
+                        <li>Zoek langste match met minimaal 70% similarity</li>
+                        <li>Verwijder overlap uit nieuw segment</li>
+                        <li>Maximum 50 woorden overlap (~15 seconden spraak)</li>
+                    </ol>
+                </div>
+                
+                <h3>Empty Recording Detection</h3>
+                <div class="warning-box">
+                    <strong>⚠️ Automatische Cleanup Triggers:</strong>
+                    <ul>
+                        <li><strong>Te kort:</strong> Opname korter dan minimum segment duration (geen segments gemaakt) → Direct verwijderd</li>
+                        <li><strong>Segment te kort:</strong> Individueel segment < 0.1 seconden → Lege transcriptie voor dat segment</li>
+                        <li><strong>Lege transcriptie:</strong> Alle segments getranscribeerd maar finale tekst is leeg → Recording verwijderd</li>
+                    </ul>
+                </div>
+            </section>
+            
+            <section id="components">
+                <h2>🔧 Componenten Detail</h2>
+                
+                <h3>1. VoiceCapture (main.py)</h3>
+                <div class="architecture-box">
+                    <p><strong>Verantwoordelijkheid:</strong> Core applicatie logica en orchestratie</p>
+                    <p><strong>Key Methods:</strong></p>
+                    <ul>
+                        <li><code>init_tray_icon()</code> - Initialiseert system tray UI</li>
+                        <li><code>tray_toggle_recording()</code> - Toggle opname on/off</li>
+                        <li><code>load_model_async()</code> - Laadt Whisper model in background</li>
+                        <li><code>on_segment_ready()</code> - Callback voor nieuwe audio segmenten</li>
+                        <li><code>transcribe_segment_thread()</code> - Transcribeer segment in thread</li>
+                        <li><code>check_and_finalize_recording()</code> - Wacht op alle transcripties</li>
+                        <li><code>finalize_recording()</code> - Combineer transcripties en sla op</li>
+                        <li><code>finalize_recording_no_segments()</code> - Cleanup voor te korte opnames</li>
+                    </ul>
+                    <p><strong>State Management:</strong></p>
+                    <ul>
+                        <li><code>is_recording</code> - Boolean voor opname status</li>
+                        <li><code>loaded_models</code> - Dictionary van gecachte Whisper modellen</li>
+                        <li><code>selected_model_name</code> - Huidig actieve model</li>
+                        <li><code>current_recording_id</code> - Timestamp ID van huidige opname</li>
+                        <li><code>is_transcribing_segment</code> - Flag voor segment transcriptie status</li>
+                    </ul>
+                </div>
+                
+                <h3>2. AudioRecorder (audio_recorder.py)</h3>
+                <div class="architecture-box">
+                    <p><strong>Verantwoordelijkheid:</strong> Low-level audio capture en segment management</p>
+                    <p><strong>Key Methods:</strong></p>
+                    <ul>
+                        <li><code>start_recording(segment_callback)</code> - Start audio stream met callback</li>
+                        <li><code>stop_recording()</code> - Stop stream en sla complete audio op</li>
+                        <li><code>get_audio_devices()</code> - Lijst beschikbare audio input devices</li>
+                        <li><code>set_input_device(index)</code> - Selecteer audio input device</li>
+                    </ul>
+                    <p><strong>Configuration:</strong></p>
+                    <ul>
+                        <li>Chunk size: 1024 samples</li>
+                        <li>Sample rate: 16000 Hz</li>
+                        <li>Format: 16-bit PCM (paInt16)</li>
+                        <li>Channels: 1 (Mono)</li>
+                        <li>Segment duration: 10 seconds</li>
+                        <li>Overlap duration: 5 seconds</li>
+                    </ul>
+                    <p><strong>Threading:</strong> Recording loop draait in daemon thread voor non-blocking operation</p>
+                </div>
+                
+                <h3>3. RecordingManager (recording_manager.py)</h3>
+                <div class="architecture-box">
+                    <p><strong>Verantwoordelijkheid:</strong> Metadata management en opslag</p>
+                    <p><strong>Key Methods:</strong></p>
+                    <ul>
+                        <li><code>load_recordings()</code> - Laad alle recordings uit JSON files</li>
+                        <li><code>update_recording()</code> - Update metadata voor een opname</li>
+                        <li><code>get_recording(id)</code> - Haal specifieke opname metadata op</li>
+                        <li><code>get_audio_duration()</code> - Bereken duration uit WAV file</li>
+                    </ul>
+                    <p><strong>Data Format:</strong> Elk recording heeft eigen folder met:</p>
+                    <ul>
+                        <li><code>recording_YYYYMMDD_HHMMSS.json</code> - Metadata (naam, datum, duration, transcriptie)</li>
+                        <li><code>recording_YYYYMMDD_HHMMSS.wav</code> - Complete audio</li>
+                        <li><code>transcription_YYYYMMDD_HHMMSS.txt</code> - Finale transcriptie</li>
+                        <li><code>segments/</code> - Folder met segment audio en transcripties</li>
+                    </ul>
+                </div>
+                
+                <h3>4. Transcription Utils (transcription_utils.py)</h3>
+                <div class="architecture-box">
+                    <p><strong>Verantwoordelijkheid:</strong> Overlap detection en removal</p>
+                    <p><strong>Key Function:</strong></p>
+                    <ul>
+                        <li><code>remove_overlap(previous_text, new_text)</code> - Intelligente overlap removal</li>
+                    </ul>
+                    <p><strong>Algoritme:</strong></p>
+                    <ol>
+                        <li>Split teksten in woorden</li>
+                        <li>Itereer van max naar min overlap (max 50 woorden)</li>
+                        <li>Vergelijk laatste woorden vorige tekst met eerste woorden nieuwe tekst</li>
+                        <li>Bereken similarity score (70% threshold)</li>
+                        <li>Verwijder beste match uit nieuwe tekst</li>
+                    </ol>
+                </div>
+                
+                <h3>5. FastAPI Server (openapi_server.py)</h3>
+                <div class="architecture-box">
+                    <p><strong>Verantwoordelijkheid:</strong> REST API voor externe toegang</p>
+                    <p><strong>Endpoints:</strong></p>
+                    <ul>
+                        <li><code>GET /</code> - API informatie</li>
+                        <li><code>GET /recordings</code> - Lijst alle opnames</li>
+                        <li><code>GET /recordings/{id}</code> - Specifieke opname details</li>
+                        <li><code>GET /recordings/{id}/transcription</code> - Transcriptie tekst</li>
+                        <li><code>GET /recordings/{id}/audio</code> - Download audio bestand</li>
+                        <li><code>GET /docs</code> - Swagger UI documentatie</li>
+                        <li><code>GET /redoc</code> - ReDoc documentatie</li>
+                    </ul>
+                    <p><strong>Server:</strong> Draait op http://localhost:8000 met Uvicorn</p>
+                </div>
+                
+                <h3>6. MCP Server (mcp_server.py)</h3>
+                <div class="architecture-box">
+                    <p><strong>Verantwoordelijkheid:</strong> Model Context Protocol voor Claude Desktop</p>
+                    <p><strong>Tools:</strong></p>
+                    <ul>
+                        <li><code>list_recordings</code> - Toon alle beschikbare opnames</li>
+                        <li><code>get_recording</code> - Haal volledige recording data op inclusief transcriptie</li>
+                    </ul>
+                    <p><strong>Integratie:</strong> Voeg toe aan Claude Desktop config voor voice capture toegang</p>
+                </div>
+            </section>
+            
+            <section id="tech-stack">
+                <h2>💻 Tech Stack</h2>
+                
+                <h3>Core Dependencies</h3>
+                <div class="tech-stack">
+                    <span class="tech-badge">Python 3.13</span>
+                    <span class="tech-badge">PyQt6 6.8.0</span>
+                    <span class="tech-badge">PyAudio 0.2.14</span>
+                    <span class="tech-badge">OpenAI Whisper</span>
+                    <span class="tech-badge">PyTorch</span>
+                    <span class="tech-badge">FastAPI 0.115.5</span>
+                    <span class="tech-badge">Uvicorn</span>
+                </div>
+                
+                <h3>Development Stack</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Technology</th>
+                            <th>Versie</th>
+                            <th>Doel</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>UI Framework</td>
+                            <td>PyQt6</td>
+                            <td>6.8.0</td>
+                            <td>System tray interface en event loop</td>
+                        </tr>
+                        <tr>
+                            <td>Audio I/O</td>
+                            <td>PyAudio + PortAudio</td>
+                            <td>0.2.14</td>
+                            <td>Cross-platform audio recording</td>
+                        </tr>
+                        <tr>
+                            <td>ML Model</td>
+                            <td>OpenAI Whisper</td>
+                            <td>Latest</td>
+                            <td>Speech-to-text transcriptie</td>
+                        </tr>
+                        <tr>
+                            <td>ML Backend</td>
+                            <td>PyTorch</td>
+                            <td>2.5.1</td>
+                            <td>Neural network inference</td>
+                        </tr>
+                        <tr>
+                            <td>REST API</td>
+                            <td>FastAPI</td>
+                            <td>0.115.5</td>
+                            <td>Web API endpoints</td>
+                        </tr>
+                        <tr>
+                            <td>API Server</td>
+                            <td>Uvicorn</td>
+                            <td>0.32.1</td>
+                            <td>ASGI server</td>
+                        </tr>
+                        <tr>
+                            <td>MCP Protocol</td>
+                            <td>mcp</td>
+                            <td>1.1.2</td>
+                            <td>Claude Desktop integratie</td>
+                        </tr>
+                        <tr>
+                            <td>Build Tool</td>
+                            <td>PyInstaller</td>
+                            <td>6.11.1</td>
+                            <td>Standalone executable creation</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3>System Dependencies</h3>
+                <div class="info-box">
+                    <strong>Externe Requirements:</strong>
+                    <ul>
+                        <li><strong>PortAudio:</strong> Cross-platform audio I/O library (via Homebrew/Chocolatey/apt)</li>
+                        <li><strong>FFmpeg:</strong> Audio format conversie en processing</li>
+                        <li><strong>Python 3.13:</strong> Latest Python runtime met performance optimalisaties</li>
+                    </ul>
+                </div>
+                
+                <h3>Hardware Acceleratie</h3>
+                <div class="success-box">
+                    <strong>✅ PyTorch Device Support:</strong>
+                    <ul>
+                        <li><strong>macOS:</strong> MPS (Metal Performance Shaders) voor M1/M2/M3 chips</li>
+                        <li><strong>Windows/Linux:</strong> CUDA voor NVIDIA GPU's</li>
+                        <li><strong>Fallback:</strong> CPU inference voor compatibility</li>
+                    </ul>
+                    <p>Whisper transcriptie gebruikt <code>fp16=False</code> om NaN issues op MPS te voorkomen.</p>
+                </div>
+            </section>
+            
+            <section id="api">
+                <h2>🌐 API Documentatie</h2>
+                
+                <h3>OpenAPI Server</h3>
+                <div class="info-box">
+                    <p><strong>Base URL:</strong> <code>http://localhost:8000</code></p>
+                    <p><strong>Documentatie:</strong></p>
+                    <ul>
+                        <li>Swagger UI: <a href="http://localhost:8000/docs" target="_blank">http://localhost:8000/docs</a></li>
+                        <li>ReDoc: <a href="http://localhost:8000/redoc" target="_blank">http://localhost:8000/redoc</a></li>
+                        <li>OpenAPI Schema: <a href="http://localhost:8000/openapi.json" target="_blank">http://localhost:8000/openapi.json</a></li>
+                    </ul>
+                </div>
+                
+                <h3>Endpoints</h3>
+                
+                <h4>GET /</h4>
+                <div class="code-block">
+Response: {
+  "name": "Voice Capture API",
+  "version": "1.0.0",
+  "description": "REST API voor Voice Capture opnames"
+}</div>
+                
+                <h4>GET /recordings</h4>
+                <p>Lijst alle beschikbare opnames</p>
+                <div class="code-block">
+Response: {
+  "recordings": [
+    {
+      "id": "20251120_143022",
+      "name": "Opname 2025-11-20 14:30",
+      "date": "2025-11-20T14:30:22",
+      "duration": "PT2M15S",
+      "model": "medium",
+      "transcription": "Dit is een voorbeeld..."
+    }
+  ]
+}</div>
+                
+                <h4>GET /recordings/{id}</h4>
+                <p>Haal specifieke opname details op</p>
+                <div class="code-block">
+Response: {
+  "id": "20251120_143022",
+  "name": "Opname 2025-11-20 14:30",
+  "date": "2025-11-20T14:30:22",
+  "duration": "PT2M15S",
+  "model": "medium",
+  "transcription": "Volledige transcriptie tekst..."
+}</div>
+                
+                <h4>GET /recordings/{id}/transcription</h4>
+                <p>Haal alleen de transcriptie tekst op</p>
+                <div class="code-block">
+Response: {
+  "transcription": "Alleen de transcriptie tekst zonder metadata"
+}</div>
+                
+                <h4>GET /recordings/{id}/audio</h4>
+                <p>Download het audio bestand</p>
+                <div class="code-block">
+Response: Binary WAV file
+Content-Type: audio/wav
+Content-Disposition: attachment; filename="recording_20251120_143022.wav"</div>
+                
+                <h3>Error Responses</h3>
+                <div class="warning-box">
+                    <strong>404 Not Found:</strong>
+                    <div class="code-block">
+{
+  "detail": "Recording not found"
+}</div>
+                    <strong>500 Internal Server Error:</strong>
+                    <div class="code-block">
+{
+  "detail": "Error message"
+}</div>
+                </div>
+                
+                <h3>MCP Protocol</h3>
+                <div class="architecture-box">
+                    <p><strong>Claude Desktop Configuratie:</strong></p>
+                    <div class="code-block">
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "python",
+      "args": ["/path/to/voice_capture/mcp_server.py"]
+    }
+  }
+}</div>
+                    <p>Na configuratie kan Claude Desktop direct opnames opvragen en transcripties analyseren.</p>
+                </div>
+            </section>
+            
+            <section id="data-storage">
+                <h2>💾 Data Opslag</h2>
+                
+                <h3>Folder Structuur</h3>
+                <div class="code-block">
+~/Documents/VoiceCapture/
+├── recording_20251120_143022/
+│   ├── recording_20251120_143022.json      # Metadata
+│   ├── recording_20251120_143022.wav       # Complete audio (16kHz, mono, 16-bit)
+│   ├── transcription_20251120_143022.txt   # Finale transcriptie
+│   └── segments/
+│       ├── segment_0.wav                   # 10s audio segment
+│       ├── transcription_0.txt             # Segment transcriptie
+│       ├── segment_1.wav
+│       ├── transcription_1.txt
+│       └── ...
+└── recording_20251120_150415/
+    └── ...</div>
+                
+                <h3>Metadata Format (JSON)</h3>
+                <div class="code-block">
+{
+  "id": "20251120_143022",
+  "name": "Opname 2025-11-20 14:30",
+  "date": "2025-11-20T14:30:22",
+  "duration": "PT2M15S",
+  "model": "medium",
+  "transcription": "Volledige getranscribeerde tekst van de opname..."
+}</div>
+                
+                <h3>Audio Specificaties</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Property</th>
+                            <th>Waarde</th>
+                            <th>Reden</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Sample Rate</td>
+                            <td>16000 Hz</td>
+                            <td>Whisper's native sample rate voor optimale kwaliteit</td>
+                        </tr>
+                        <tr>
+                            <td>Bit Depth</td>
+                            <td>16-bit</td>
+                            <td>Standard voor speech, goede kwaliteit vs file size</td>
+                        </tr>
+                        <tr>
+                            <td>Channels</td>
+                            <td>1 (Mono)</td>
+                            <td>Speech heeft geen stereo nodig, halveert file size</td>
+                        </tr>
+                        <tr>
+                            <td>Format</td>
+                            <td>WAV (PCM)</td>
+                            <td>Lossless, direct compatible met Whisper</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            
+            <section id="performance">
+                <h2>⚡ Performance & Optimalisaties</h2>
+                
+                <h3>Model Caching</h3>
+                <div class="success-box">
+                    <p>Whisper modellen blijven in geheugen na eerste load:</p>
+                    <ul>
+                        <li><strong>First Load:</strong> 5-15 seconden (afhankelijk van model size)</li>
+                        <li><strong>Cached:</strong> Instant (~0s overhead)</li>
+                        <li><strong>Memory:</strong> Tiny: ~1GB, Small: ~2GB, Medium: ~5GB, Large: ~10GB</li>
+                    </ul>
+                    <p>Trade-off tussen geheugen gebruik en response tijd. Meerdere modellen kunnen tegelijk geladen zijn.</p>
+                </div>
+                
+                <h3>Segmented Processing</h3>
+                <div class="architecture-box">
+                    <p><strong>Voordelen:</strong></p>
+                    <ul>
+                        <li>Real-time feedback tijdens lange opnames</li>
+                        <li>Parallelle transcriptie mogelijk (toekomstige feature)</li>
+                        <li>Kleinere audio chunks = snellere individuele transcripties</li>
+                        <li>Betere error recovery (1 segment faalt ≠ hele opname verloren)</li>
+                    </ul>
+                    <p><strong>Overhead:</strong></p>
+                    <ul>
+                        <li>5 seconden overlap per segment (~50% overhead in processing)</li>
+                        <li>Overlap removal algoritme adds ~10ms per segment</li>
+                        <li>Extra I/O voor segment files (minimaal op SSD)</li>
+                    </ul>
+                </div>
+                
+                <h3>Threading Model</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Thread</th>
+                            <th>Purpose</th>
+                            <th>Blocking</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Main (Qt Event Loop)</td>
+                            <td>UI updates, menu interactions</td>
+                            <td>Non-blocking</td>
+                        </tr>
+                        <tr>
+                            <td>Audio Recording</td>
+                            <td>PyAudio stream reading</td>
+                            <td>Daemon, non-blocking</td>
+                        </tr>
+                        <tr>
+                            <td>Model Loading</td>
+                            <td>Whisper model initialization</td>
+                            <td>Background, signals when done</td>
+                        </tr>
+                        <tr>
+                            <td>Transcription</td>
+                            <td>Whisper inference per segment</td>
+                            <td>Background, one at a time</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3>Typical Performance</h3>
+                <div class="info-box">
+                    <p><strong>On M1 Mac (MPS acceleration):</strong></p>
+                    <ul>
+                        <li><strong>Tiny Model:</strong> ~0.5x realtime (10s audio in 5s)</li>
+                        <li><strong>Small Model:</strong> ~1x realtime (10s audio in 10s)</li>
+                        <li><strong>Medium Model:</strong> ~2x realtime (10s audio in 20s)</li>
+                        <li><strong>Large Model:</strong> ~4x realtime (10s audio in 40s)</li>
+                    </ul>
+                    <p>Performance varieert met CPU/GPU. CUDA typically faster dan MPS voor grote modellen.</p>
+                </div>
+            </section>
+        </main>
+        
+        <footer>
+            <p>🎙️ Voice Capture - Professional Audio Transcription</p>
+            <p style="margin-top: 10px; opacity: 0.8;">Built with Python, PyQt6, OpenAI Whisper & FastAPI</p>
+        </footer>
+    </div>
+</body>
+</html>
