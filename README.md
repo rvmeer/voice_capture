@@ -207,6 +207,12 @@ Voor gebruik met Claude Desktop, zie [MCP_README.md](MCP_README.md).
 - Op GNOME kan een extensie nodig zijn voor tray iconen
 - Audio permissions kunnen via PulseAudio of ALSA ingesteld worden
 
+### DGX Spark
+
+```
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+```
+
 ## Licentie
 
 MIT License

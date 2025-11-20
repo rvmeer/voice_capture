@@ -108,7 +108,7 @@ run_docker() {
         echo -e "${BLUE}Running: ${cmd}${NC}"
         echo ""
 
-        docker run --rm --gpus all \
+        docker run --rm --runtime=nvidia --gpus all \
             -v "${RECORDINGS_DIR}:${CONTAINER_RECORDINGS_DIR}" \
             "${IMAGE_NAME}:${IMAGE_TAG}" \
             ${cmd}
