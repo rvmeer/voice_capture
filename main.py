@@ -754,6 +754,33 @@ class VoiceCapture(QObject):
 
         final_transcription = " ".join(combined_texts)
 
+        # Check if transcription is empty - if so, delete the recording
+        if not final_transcription.strip():
+            logger.info(f"Recording {self.current_recording_id} has empty transcription - removing recording folder")
+            
+            # Delete the entire recording folder since transcription is empty
+            import shutil
+            if rec_dir.exists():
+                try:
+                    shutil.rmtree(rec_dir)
+                    logger.info(f"Removed recording folder: {rec_dir} (duration: {duration}s)")
+                except Exception as e:
+                    logger.error(f"Failed to remove recording folder {rec_dir}: {e}", exc_info=True)
+
+            # Show notification
+            if hasattr(self, 'tray_icon'):
+                self.tray_icon.showMessage(
+                    "Opname Leeg",
+                    f"Opname heeft geen transcriptie en is verwijderd ({duration}s)",
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    3000
+                )
+
+            # Reset state
+            self.is_recording = False
+            self.pending_recording_name = None
+            return
+
         # Save final transcription
         transcription_file = rec_dir / f"transcription_{self.current_recording_id}.txt"
         with open(transcription_file, 'w', encoding='utf-8') as f:
