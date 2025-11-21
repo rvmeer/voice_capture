@@ -1,312 +1,145 @@
 """
 Tray Icon Actions Module
-Contains all tray menu action handlers
+Contains business logic for tray menu actions (no Qt/GUI code)
 """
 
-from PyQt6.QtWidgets import QSystemTrayIcon, QMessageBox, QInputDialog
-from PyQt6.QtCore import Qt
 from datetime import datetime
-from pathlib import Path
 from logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
 class TrayActions:
-    """Mixin class containing all tray icon menu actions"""
+    """Handler for tray icon action business logic (no Qt/GUI code)"""
 
-    def on_tray_icon_activated(self, reason):
-        """Handle tray icon activation (click)"""
-        from PyQt6.QtGui import QCursor
+    def __init__(self, voice_capture):
+        """
+        Initialize tray actions handler
 
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:  # Left click
-            self.tray_toggle_recording()
-        elif reason == QSystemTrayIcon.ActivationReason.Context:  # Right click / Control+click on macOS
-            # Show context menu at cursor position
-            self.tray_menu.popup(QCursor.pos())
+        Args:
+            voice_capture: The VoiceCapture instance (main application)
+        """
+        self.app = voice_capture
 
-    def tray_toggle_recording(self):
-        """Toggle recording from tray icon"""
-        if not self.is_recording:
-            self.tray_start_recording()
+    def toggle_recording(self):
+        """Toggle recording - business logic only"""
+        if not self.app.is_recording:
+            self.start_recording()
         else:
-            self.tray_stop_recording()
+            self.stop_recording()
 
-    def tray_start_recording(self):
-        """Start recording from tray"""
+    def start_recording(self):
+        """Start recording - business logic only"""
         logger.info("Starting recording from tray")
+        self.app.start_recording()
 
-        # Update tray icon to recording state
-        from main import create_tray_icon
-        self.tray_icon.setIcon(create_tray_icon(recording=True))
-        self.tray_icon.setToolTip("Opname bezig... (klik om te stoppen)")
-
-        self.start_recording()
-
-    def tray_stop_recording(self):
-        """Stop recording from tray"""
+    def stop_recording(self):
+        """Stop recording - business logic only"""
         logger.info("Stopping recording from tray")
 
-        # Update tray icon to idle state
-        from main import create_tray_icon
-        self.tray_icon.setIcon(create_tray_icon(recording=False))
-        self.tray_icon.setToolTip("Voice Capture (klik om op te nemen)")
-
-        def save_and_continue():
-            try:
-                self.current_audio_file, self.current_recording_id = self.recorder.stop_recording()
-
-                # Auto-generate name based on timestamp
-                recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-
-                # Store the recording name for later use
-                self.pending_recording_name = recording_name
-
-                # Wait for all segments to be transcribed, then finalize
-                logger.info(f"Recording stopped (tray mode), waiting for all segments to be transcribed...")
-                self.check_and_finalize_recording()
-
-            except Exception as e:
-                logger.error(f"Error in save_and_continue: {e}", exc_info=True)
-                QMessageBox.critical(None, "Fout", f"Fout bij opslaan: {str(e)}")
-
-        # Stop recording and save
-        save_and_continue()
-
-    def refresh_tray_input_devices(self):
-        """Refresh the audio input device list in tray menu"""
         try:
-            # Get list of audio input devices
-            devices = self.recorder.get_audio_devices()
+            # Stop the recorder
+            self.app.current_audio_file, self.app.current_recording_id = self.app.recorder.stop_recording()
 
-            # Clear existing input device actions
-            if hasattr(self, 'tray_input_menu') and self.tray_input_menu:
-                self.tray_input_menu.clear()
+            # Auto-generate name based on timestamp
+            recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
-                # Create action group for exclusive selection
-                from PyQt6.QtGui import QActionGroup
-                input_device_group = QActionGroup(self.tray_input_menu)
-                input_device_group.setExclusive(True)
+            # Store the recording name for later use
+            self.app.pending_recording_name = recording_name
 
-                # Add default device option
-                default_action = self.tray_input_menu.addAction("Standaard apparaat")
-                default_action.setCheckable(True)
-                default_action.setChecked(self.recorder.input_device_index is None)
-                input_device_group.addAction(default_action)
-                default_action.triggered.connect(lambda checked, idx=None: self.set_tray_input_device(idx))
-
-                # Add separator
-                self.tray_input_menu.addSeparator()
-
-                # Add each device
-                for device in devices:
-                    device_name = device['name']
-                    device_index = device['index']
-
-                    action = self.tray_input_menu.addAction(device_name)
-                    action.setCheckable(True)
-                    action.setChecked(self.recorder.input_device_index == device_index)
-                    input_device_group.addAction(action)
-                    action.triggered.connect(lambda checked, idx=device_index: self.set_tray_input_device(idx))
-
-                logger.debug(f"Refreshed tray input devices menu with {len(devices)} devices")
+            # Wait for all segments to be transcribed, then finalize
+            logger.info(f"Recording stopped (tray mode), waiting for all segments to be transcribed...")
+            self.app.check_and_finalize_recording()
 
         except Exception as e:
-            logger.error(f"Error refreshing tray input devices: {e}", exc_info=True)
+            logger.error(f"Error stopping recording: {e}", exc_info=True)
+            # Reset state even on error
+            self.app.is_recording = False
+            raise  # Re-raise so UI can handle it
 
-    def set_tray_input_device(self, device_index):
-        """Set input device from tray menu"""
+    def set_input_device(self, device_index):
+        """Set input device - business logic only"""
         try:
-            self.recorder.set_input_device(device_index)
+            self.app.recorder.set_input_device(device_index)
 
             if device_index is None:
                 logger.info("Set input device to default")
-                if hasattr(self, 'tray_icon'):
-                    self.tray_icon.showMessage(
-                        "Invoerapparaat Gewijzigd",
-                        "Invoerapparaat ingesteld op standaard apparaat",
-                        QSystemTrayIcon.MessageIcon.Information,
-                        2000
-                    )
+                return "Invoerapparaat ingesteld op standaard apparaat"
             else:
                 # Get device name
-                devices = self.recorder.get_audio_devices()
+                devices = self.app.recorder.get_audio_devices()
                 device_name = next((d['name'] for d in devices if d['index'] == device_index), f"Device {device_index}")
-
                 logger.info(f"Set input device to: {device_name}")
-                if hasattr(self, 'tray_icon'):
-                    self.tray_icon.showMessage(
-                        "Invoerapparaat Gewijzigd",
-                        f"Invoerapparaat ingesteld op: {device_name}",
-                        QSystemTrayIcon.MessageIcon.Information,
-                        2000
-                    )
+                return f"Invoerapparaat ingesteld op: {device_name}"
 
         except Exception as e:
-            logger.error(f"Error setting tray input device: {e}", exc_info=True)
-            QMessageBox.warning(None, "Fout", f"Kon invoerapparaat niet instellen: {str(e)}")
+            logger.error(f"Error setting input device: {e}", exc_info=True)
+            raise  # Re-raise so UI can handle it
 
-    def set_tray_model(self, model_name):
-        """Set Whisper model from tray menu"""
+    def set_model(self, model_name):
+        """Set Whisper model - business logic only"""
         try:
             logger.info(f"Setting model to {model_name} from tray")
 
             # Update selected model
-            self.selected_model_name = model_name
-
-            # Update tray menu checkmarks
-            if hasattr(self, 'tray_tiny_action'):
-                self.tray_tiny_action.setChecked(model_name == "tiny")
-            if hasattr(self, 'tray_small_action'):
-                self.tray_small_action.setChecked(model_name == "small")
-            if hasattr(self, 'tray_medium_action'):
-                self.tray_medium_action.setChecked(model_name == "medium")
-            if hasattr(self, 'tray_large_action'):
-                self.tray_large_action.setChecked(model_name == "large")
-
-            # Show notification
-            if hasattr(self, 'tray_icon'):
-                self.tray_icon.showMessage(
-                    "Model Gewijzigd",
-                    f"Whisper model ingesteld op: {model_name}",
-                    QSystemTrayIcon.MessageIcon.Information,
-                    2000
-                )
+            self.app.selected_model_name = model_name
 
             # Load model if not already loaded
-            if model_name not in self.loaded_models:
+            if model_name not in self.app.loaded_models:
                 logger.info(f"Loading {model_name} model...")
-                self.load_model_async(model_name)
+                self.app.load_model_async(model_name)
+
+            return f"Whisper model ingesteld op: {model_name}"
 
         except Exception as e:
-            logger.error(f"Error setting tray model: {e}", exc_info=True)
-            QMessageBox.warning(None, "Fout", f"Kon model niet instellen: {str(e)}")
+            logger.error(f"Error setting model: {e}", exc_info=True)
+            raise  # Re-raise so UI can handle it
 
-    def show_version_info(self):
-        """Show version information"""
-        from version import get_version_string
-        version = get_version_string()
-
-        QMessageBox.information(
-            None,
-            "Versie Informatie",
-            f"Voice Capture\n\nVersie: {version}"
-        )
-
-    def show_retranscribe_dialog(self):
-        """Show dialog to select a recording to retranscribe"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QPushButton, QLabel, QHBoxLayout, QListWidgetItem
-
-        # Check if currently recording
-        if self.is_recording:
-            QMessageBox.warning(None, "Fout", "Stop eerst de huidige opname voordat je hertranscribeert.")
-            return
-
-        # Check if currently transcribing
-        if self.is_transcribing_segment:
-            QMessageBox.warning(None, "Fout", "Wacht tot de huidige transcriptie is voltooid.")
-            return
-
+    def get_retranscribe_recordings(self):
+        """Get list of recordings that can be retranscribed - business logic only"""
         # Load all recordings
-        self.recording_manager.load_recordings()
-        all_recordings = self.recording_manager.recordings
+        self.app.recording_manager.load_recordings()
+        all_recordings = self.app.recording_manager.recordings
 
         # Filter recordings to only include those with a WAV file
         recordings = []
         for recording in all_recordings:
             recording_id = recording.get('id', '')
             # Check if recording_<timestamp>.wav exists
-            rec_dir = self.recording_manager.recordings_dir / f"recording_{recording_id}"
+            rec_dir = self.app.recording_manager.recordings_dir / f"recording_{recording_id}"
             audio_file = rec_dir / f"recording_{recording_id}.wav"
             if audio_file.exists():
                 recordings.append(recording)
 
-        if not recordings:
-            QMessageBox.information(None, "Geen Opnames", "Er zijn geen opnames met audio bestanden gevonden om te hertranscriberen.")
-            return
+        return recordings
 
-        # Create dialog
-        dialog = QDialog()
-        dialog.setWindowTitle("Selecteer Opname voor Hertranscriptie")
-        dialog.setMinimumWidth(500)
-        dialog.setMinimumHeight(400)
-
-        layout = QVBoxLayout()
-
-        # Add instruction label
-        instruction_label = QLabel(f"Selecteer een opname om te hertranscriberen met het <b>{self.selected_model_name}</b> model:")
-        layout.addWidget(instruction_label)
-
-        # Create list widget
-        list_widget = QListWidget()
-
-        # Populate with recordings that have WAV files
-        for recording in recordings:
-            recording_id = recording.get('id', '')
-            recording_name = recording.get('name', recording_id)
-            recording_date = recording.get('date', '')
-            duration = recording.get('duration', '')
-            current_model = recording.get('model', '')
-
-            # Format display text
-            display_text = f"{recording_name} - {recording_date}"
-            if duration:
-                display_text += f" ({duration})"
-            if current_model:
-                display_text += f" [model: {current_model}]"
-
-            item = QListWidgetItem(display_text)
-            item.setData(Qt.ItemDataRole.UserRole, recording_id)
-            list_widget.addItem(item)
-
-        layout.addWidget(list_widget)
-
-        # Add buttons
-        button_layout = QHBoxLayout()
-
-        ok_button = QPushButton("Hertranscriberen")
-        cancel_button = QPushButton("Annuleren")
-
-        button_layout.addWidget(ok_button)
-        button_layout.addWidget(cancel_button)
-
-        layout.addLayout(button_layout)
-
-        dialog.setLayout(layout)
-
-        # Connect buttons
-        def on_ok():
-            selected_items = list_widget.selectedItems()
-            if not selected_items:
-                QMessageBox.warning(dialog, "Geen Selectie", "Selecteer een opname om te hertranscriberen.")
-                return
-
-            recording_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
-            dialog.accept()
-
-            # Start retranscription
-            self.start_retranscription(recording_id)
-
-        def on_cancel():
-            dialog.reject()
-
-        ok_button.clicked.connect(on_ok)
-        cancel_button.clicked.connect(on_cancel)
-
-        # Show dialog
-        dialog.exec()
+    def start_retranscription(self, recording_id):
+        """Start retranscription - business logic only"""
+        logger.info(f"Starting retranscription of recording {recording_id} with model {self.app.selected_model_name}")
+        self.app.start_retranscription(recording_id)
 
     def quit_application(self):
-        """Quit the application"""
+        """Quit the application - business logic only"""
         logger.info("Quitting application...")
 
-        # Stop recording if active
-        if self.is_recording:
-            self.recorder.stop_recording()
+        try:
+            # Stop recording if active
+            if self.app.is_recording:
+                logger.info("Stopping active recording...")
+                try:
+                    self.app.recorder.stop_recording()
+                except Exception as e:
+                    logger.error(f"Error stopping recording: {e}")
 
-        # Clean up
-        self.recorder.cleanup()
+            # Stop timer
+            if hasattr(self.app, 'timer') and self.app.timer.isActive():
+                self.app.timer.stop()
 
-        # Quit
-        from PyQt6.QtWidgets import QApplication
-        QApplication.quit()
+            # Clean up recorder
+            try:
+                self.app.recorder.cleanup()
+            except Exception as e:
+                logger.error(f"Error during recorder cleanup: {e}")
+
+        except Exception as e:
+            logger.error(f"Error during quit: {e}", exc_info=True)
