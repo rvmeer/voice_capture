@@ -131,10 +131,6 @@ class TrayActions:
                 except Exception as e:
                     logger.error(f"Error stopping recording: {e}")
 
-            # Stop timer
-            if hasattr(self.app, 'timer') and self.app.timer.isActive():
-                self.app.timer.stop()
-
             # Clean up recorder
             try:
                 self.app.recorder.cleanup()

@@ -88,7 +88,6 @@ class VoiceCapture(QObject):
 
         # Recording state
         self.is_recording = False
-        self.recording_time = 0
         self.current_audio_file = None
         self.current_recording_id = None
 
@@ -112,9 +111,7 @@ class VoiceCapture(QObject):
         self.segment_duration = 10  # seconds
         self.overlap_duration = 5  # seconds
 
-        # Timer for recording duration
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
+
 
         # Initialize tray actions handler (business logic only)
         self.tray_actions = TrayActions(self)
@@ -446,7 +443,6 @@ class VoiceCapture(QObject):
         """Start recording"""
         logger.info("Starting recording...")
         self.is_recording = True
-        self.recording_time = 0
 
         # Clear previous segments
         self.segments_to_transcribe = []
@@ -474,14 +470,7 @@ class VoiceCapture(QObject):
             overlap_duration=self.overlap_duration
         )
 
-        # Start timer
-        self.timer.start(1000)  # Update every second
-
         logger.info(f"Recording started with ID: {self.current_recording_id}")
-
-    def update_timer(self):
-        """Update recording timer"""
-        self.recording_time += 1
 
     def on_segment_ready(self, segment_file, segment_num):
         """Called when a new segment is ready"""
@@ -934,7 +923,7 @@ def main():
     # Install a timer to allow Python to process signals
     # Qt event loop blocks Python signal handlers, so we need to wake up periodically
     timer = QTimer()
-    timer.start(5000)  # Wake up every 5 seconds to allow signal processing (reduced CPU usage)
+    timer.start(30000)  # Wake up every 30 seconds to allow signal processing (battery optimized)
     timer.timeout.connect(lambda: None)  # Do nothing, just process signals
 
     # Run the application

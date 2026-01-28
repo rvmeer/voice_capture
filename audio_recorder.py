@@ -19,7 +19,7 @@ class AudioRecorder:
     """Handles audio recording functionality"""
 
     def __init__(self):
-        self.CHUNK = 1024
+        self.CHUNK = 4096  # Increased from 1024 for better battery efficiency
         self.FORMAT = pyaudio.paInt16
         self.CHANNELS = 1
         self.RATE = 16000
