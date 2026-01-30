@@ -12,15 +12,44 @@ Real-time audio transcription using OpenAI Whisper - Windows Edition
 4. **Look** for the icon in system tray (bottom-right, near clock)
 5. **Right-click** the tray icon to start recording
 
-### For Developers (Building from Source)
+### For Developers (Running from Source)
+
+**Easiest: Use VoiceCapture.bat**
+
+Simply double-click `VoiceCapture.bat` - it handles everything automatically:
+1. Creates Python virtual environment (`env`) if needed
+2. Installs dependencies from `requirements.txt`
+3. Installs ffmpeg via winget if not present
+4. Starts the application
+
+You can copy `VoiceCapture.bat` to your Desktop for easy access.
+
+**Manual setup:**
+
+```cmd
+# 1. Install ffmpeg (required for audio processing)
+winget install ffmpeg
+
+# 2. Create and activate Python environment
+python -m venv env
+env\Scripts\activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Create version.py (if missing)
+echo __version__ = "1.0.0" > version.py
+echo def get_version_string(): return __version__ >> version.py
+
+# 5. Run the application
+python main.py
+```
+
+**Building installer:**
 
 See [BUILD_INSTRUCTIONS_WINDOWS.md](BUILD_INSTRUCTIONS_WINDOWS.md) for detailed instructions.
 
-**Quick build:**
 ```cmd
-python -m venv env
-env\Scripts\activate
-pip install -r requirements.txt
 build_app.bat
 ```
 
@@ -32,14 +61,22 @@ build_app.bat
 
 VoiceCapture requires FFmpeg for audio processing.
 
-**Option A: Automatic (Recommended)**
-- If FFmpeg is bundled, skip this step
+**Option A: Via winget (Recommended)**
+```cmd
+winget install ffmpeg
+```
+Herstart je terminal na installatie.
 
-**Option B: Manual Installation**
+**Option B: Handmatig**
 1. Download FFmpeg: https://www.gyan.dev/ffmpeg/builds/
-2. Extract the ZIP file
-3. Copy `ffmpeg.exe` to the same folder as `VoiceCapture.exe`
-4. Or add FFmpeg to your Windows PATH
+2. Pak het ZIP bestand uit naar `C:\ffmpeg`
+3. Voeg `C:\ffmpeg\bin` toe aan je Windows PATH
+4. Herstart je terminal
+
+**Verificatie:**
+```cmd
+ffmpeg -version
+```
 
 ### 2. Microphone Permissions
 
@@ -131,6 +168,7 @@ Each recording includes:
 - Model Context Protocol support
 - Use with Claude Desktop and other AI tools
 - See MCP_README.md for setup
+- See [Claude Desktop MCP Setup](#claude-desktop-mcp-setup) below for Windows configuration
 
 ---
 
@@ -259,6 +297,54 @@ Open browser to: http://localhost:8000/docs
 - Export to other formats
 
 See [API_INTEGRATION.md](API_INTEGRATION.md) for complete documentation.
+
+---
+
+## Claude Desktop MCP Setup
+
+VoiceCapture includes an MCP (Model Context Protocol) server that allows Claude Desktop to access your recordings and transcriptions.
+
+### Configuration
+
+1. **Locate the Claude Desktop config file:**
+   ```
+   %APPDATA%\Claude\claude_desktop_config.json
+   ```
+   Full path example: `C:\Users\YourName\AppData\Roaming\Claude\claude_desktop_config.json`
+
+2. **Create or edit the config file** with the following content:
+   ```json
+   {
+     "mcpServers": {
+       "voice-capture": {
+         "command": "C:\\Users\\YourName\\git\\voice_capture\\env\\Scripts\\python.exe",
+         "args": ["C:\\Users\\YourName\\git\\voice_capture\\mcp_server.py"]
+       }
+     }
+   }
+   ```
+
+   **Important:** Replace `YourName` with your Windows username and adjust the path to match your installation location.
+
+3. **Restart Claude Desktop** to load the MCP server.
+
+### Verifying the Connection
+
+After restarting Claude Desktop, you can ask Claude:
+- "List my voice recordings"
+- "Show me the transcription from my last recording"
+- "Summarize my most recent voice note"
+
+### Available MCP Tools
+
+The VoiceCapture MCP server provides these tools to Claude:
+- `list_recordings` - List all recordings with metadata
+- `get_transcription` - Get full transcription of a recording
+- `get_transcription_summary` - Get metadata and preview of a transcription
+- `get_transcription_chunked` - Get transcription in chunks (for long recordings)
+- `update_recording_title` - Update the title of a recording
+
+See [MCP_README.md](MCP_README.md) for complete MCP documentation.
 
 ---
 
