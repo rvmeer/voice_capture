@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-whisper-recordings-mcp = "mcp_server:run"
+voice-capture-mcp = "mcp_server:run"
 
 [project.urls]
 Homepage = "https://github.com/rvmeer/voice_capture"
