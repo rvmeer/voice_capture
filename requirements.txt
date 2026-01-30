@@ -1,10 +1,7 @@
 PyQt6
 openai-whisper
 pyaudio
-numpy
 torch
-transformers
-pyannote.audio
 fastapi
 uvicorn[standard]
 pydantic
