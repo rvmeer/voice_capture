@@ -1,8 +1,11 @@
 PyQt6
 openai-whisper
 pyaudio
-torch
 fastapi
 uvicorn[standard]
 pydantic
 mcp
+
+# PyTorch wordt apart geïnstalleerd - zie README.md voor instructies:
+# - macOS/Linux: pip install torch
+# - Windows met CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu124

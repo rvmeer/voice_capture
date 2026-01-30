@@ -49,6 +49,30 @@ sudo apt-get install portaudio19-dev ffmpeg python3-pyaudio
 pip install -r requirements.txt
 ```
 
+### 3. Installeer PyTorch
+
+PyTorch moet apart geïnstalleerd worden, afhankelijk van je platform:
+
+#### macOS / Linux (CPU):
+```bash
+pip install torch
+```
+
+#### Windows met NVIDIA GPU (CUDA):
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+```
+
+#### Windows zonder GPU (CPU):
+```bash
+pip install torch
+```
+
+**Tip**: Controleer of CUDA werkt met:
+```bash
+python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
+```
+
 **Let op**: Er is geen `.env` bestand of configuratie nodig. Alle instellingen worden gedaan via het tray menu.
 
 ## Gebruik
@@ -162,6 +186,19 @@ Zie [OPENAPI_README.md](OPENAPI_README.md) voor meer details.
 
 ### MCP Server:
 Voor gebruik met Claude Desktop, zie [MCP_README.md](MCP_README.md).
+
+**Snelle configuratie via uvx** (aanbevolen):
+```json
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "uvx",
+      "args": ["voice-capture-mcp"]
+    }
+  }
+}
+```
+Zie MCP_README.md voor meer opties (GitHub, lokaal pad, virtual environment).
 
 ## Technische Details
 
