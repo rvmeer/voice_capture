@@ -26,7 +26,11 @@ from PyQt6.QtGui import QIcon, QPainter, QPixmap, QPen, QColor, QActionGroup, QC
 from audio_recorder import AudioRecorder
 from recording_manager import RecordingManager
 from logging_config import setup_logging, get_logger
-from version import get_version_string
+try:
+    from version import get_version_string
+except ImportError:
+    def get_version_string():
+        return "unknown"
 from transcription_utils import remove_overlap
 from tray_actions import TrayActions
 
