@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "whisper-recordings-mcp"
+name = "voice-capture-mcp"
 version = "1.0.0"
-description = "MCP Server for Whisper voice recordings - provides access to recordings, metadata, and transcriptions"
+description = "MCP Server for getting transcriptions of voice recordings - provides access to metadata, and transcriptions of recordings"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "Ralf van Meer" }
 ]
-keywords = ["mcp", "whisper", "voice", "recordings", "transcription"]
+keywords = ["mcp", "capture", "voice", "recordings", "transcription"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
