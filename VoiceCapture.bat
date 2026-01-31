@@ -47,7 +47,7 @@ if not exist "env\Scripts\python.exe" (
         exit /b 1
     )
     echo PyTorch met CUDA ondersteuning installeren...
-    call env\Scripts\pip.exe install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    call env\Scripts\pip.exe install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
     if errorlevel 1 (
         echo FOUT: Kon PyTorch niet installeren.
         pause
