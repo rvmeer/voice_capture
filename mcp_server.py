@@ -198,34 +198,6 @@ async def handle_list_tools() -> list[Tool]:
             }
         ),
         Tool(
-            name="get_transcription_chunked",
-            description="Get a specific chunk of a transcription for progressive processing. Chunks are ~500 words with 50-word overlap to prevent the 'lost-in-the-middle' effect. Use get_transcription_summary first to see how many chunks are available. Chunk indexing: 0 = first chunk, -1 = last chunk, -2 = second-to-last, etc. Each chunk includes metadata about its position and overlap status.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "recording_id": {
-                        "type": "string",
-                        "description": "The ID (timestamp) of the recording"
-                    },
-                    "chunk_index": {
-                        "type": "integer",
-                        "description": "Index of the chunk to retrieve. Supports negative indexing (0=first, -1=last, -2=second-to-last). Use get_transcription_summary to see total_chunks available."
-                    },
-                    "chunk_size": {
-                        "type": "integer",
-                        "description": "Optional: Number of words per chunk (default: 500)",
-                        "default": 500
-                    },
-                    "overlap": {
-                        "type": "integer",
-                        "description": "Optional: Number of overlapping words between chunks (default: 50)",
-                        "default": 50
-                    }
-                },
-                "required": ["recording_id", "chunk_index"]
-            }
-        ),
-        Tool(
             name="update_recording_title",
             description="Update the title/name of a specific recording",
             inputSchema={
@@ -367,76 +339,6 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             "recording_name": recording.get("name") if recording else "Unknown",
             "recording_date": recording.get("date") if recording else "Unknown",
             **metadata
-        }
-
-        return [
-            TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, ensure_ascii=False)
-            )
-        ]
-
-    elif name == "get_transcription_chunked":
-        # Get a specific chunk of the transcription
-        recording_id = arguments.get("recording_id")
-        chunk_index = arguments.get("chunk_index")
-        chunk_size = arguments.get("chunk_size", 500)
-        overlap = arguments.get("overlap", 50)
-
-        if not recording_id:
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps({"error": "recording_id is required"})
-                )
-            ]
-
-        if chunk_index is None:
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps({"error": "chunk_index is required"})
-                )
-            ]
-
-        # Get the full transcription text
-        transcription = get_transcription_text(recording_id)
-
-        if transcription is None:
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps({"error": f"Transcription for recording '{recording_id}' not found"})
-                )
-            ]
-
-        # Get the specific chunk
-        chunk = get_chunk_by_index(transcription, chunk_index, chunk_size, overlap)
-
-        if chunk is None:
-            # Calculate total chunks for error message
-            words = transcription.split()
-            effective_chunk_size = chunk_size - overlap
-            total_chunks = max(1, (len(words) - overlap) // effective_chunk_size +
-                             (1 if (len(words) - overlap) % effective_chunk_size > 0 else 0))
-
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps({
-                        "error": f"Chunk index {chunk_index} out of range",
-                        "total_chunks_available": total_chunks,
-                        "hint": "Use get_transcription_summary to see total_chunks, or use negative indexing (e.g., -1 for last chunk)"
-                    })
-                )
-            ]
-
-        # Add recording context to chunk
-        recording = get_recording_by_id(recording_id)
-        result = {
-            "recording_id": recording_id,
-            "recording_name": recording.get("name") if recording else "Unknown",
-            **chunk
         }
 
         return [
