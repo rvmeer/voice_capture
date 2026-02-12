@@ -7,6 +7,9 @@ Clean implementation using composition pattern with tray_actions
 import sys
 import signal
 import threading
+import shutil
+import platform
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -23,12 +26,75 @@ from PyQt6.QtGui import QIcon, QPainter, QPixmap, QPen, QColor, QActionGroup, QC
 from audio_recorder import AudioRecorder
 from recording_manager import RecordingManager
 from logging_config import setup_logging, get_logger
-from version import get_version_string
+try:
+    from version import get_version_string
+except ImportError:
+    def get_version_string():
+        return "unknown"
 from transcription_utils import remove_overlap
 from tray_actions import TrayActions
 
 # Setup logging
 logger = get_logger(__name__)
+
+
+def check_ffmpeg():
+    """Check if ffmpeg is installed and accessible."""
+    if shutil.which("ffmpeg") is not None:
+        return True
+
+    # ffmpeg not found - show error message
+    system = platform.system()
+
+    if system == "Windows":
+        message = """ffmpeg is niet geïnstalleerd of niet gevonden in PATH.
+
+Voice Capture heeft ffmpeg nodig voor audio verwerking.
+
+Installeer ffmpeg via een van deze methodes:
+
+1. Via winget (aanbevolen):
+   Open een terminal en voer uit:
+   winget install ffmpeg
+
+2. Handmatig:
+   - Download van https://www.gyan.dev/ffmpeg/builds/
+   - Pak uit naar C:\\ffmpeg
+   - Voeg C:\\ffmpeg\\bin toe aan je PATH
+
+Na installatie: herstart deze applicatie."""
+
+    elif system == "Darwin":  # macOS
+        message = """ffmpeg is niet geïnstalleerd of niet gevonden in PATH.
+
+Voice Capture heeft ffmpeg nodig voor audio verwerking.
+
+Installeer ffmpeg via Homebrew:
+   brew install ffmpeg
+
+Als je Homebrew niet hebt:
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+Na installatie: herstart deze applicatie."""
+
+    else:  # Linux
+        message = """ffmpeg is niet geïnstalleerd of niet gevonden in PATH.
+
+Voice Capture heeft ffmpeg nodig voor audio verwerking.
+
+Installeer ffmpeg via je package manager:
+
+Ubuntu/Debian:  sudo apt install ffmpeg
+Fedora:         sudo dnf install ffmpeg
+Arch:           sudo pacman -S ffmpeg
+
+Na installatie: herstart deze applicatie."""
+
+    print(f"\n{'='*60}\nFOUT: ffmpeg niet gevonden\n{'='*60}\n{message}\n{'='*60}\n",
+          file=sys.stderr)
+    logger.error("ffmpeg not found - required for audio processing")
+
+    return False
 
 
 def create_tray_icon(recording=False):
@@ -894,6 +960,10 @@ def main():
     # Log version info
     version = get_version_string()
     logger.info(f"Starting Voice Capture (Tray-Only) - Version {version}")
+
+    # Check for ffmpeg
+    if not check_ffmpeg():
+        sys.exit(1)
 
     # Create QApplication
     app = QApplication(sys.argv)

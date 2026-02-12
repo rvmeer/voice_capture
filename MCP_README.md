@@ -135,11 +135,93 @@ Update de titel/naam van een specifieke opname.
 
 ## Integratie met Claude Desktop
 
-Om deze MCP server te gebruiken met Claude Desktop, voeg het volgende toe aan je Claude configuratie bestand:
+Om deze MCP server te gebruiken met Claude Desktop, voeg het volgende toe aan je Claude configuratie bestand.
 
-### macOS
-Bestand: `~/Library/Application Support/Claude/claude_desktop_config.json`
+### Configuratie locaties
 
+| Platform | Bestand |
+|----------|---------|
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+
+---
+
+### Optie 1: Via uvx (aanbevolen)
+
+De eenvoudigste manier is via `uvx`. Dit vereist geen lokale installatie of virtual environment.
+
+**Vanuit PyPI** (als het package gepubliceerd is):
+```json
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "uvx",
+      "args": ["voice-capture-mcp"]
+    }
+  }
+}
+```
+
+**Vanuit GitHub**:
+```json
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/rvmeer/voice_capture",
+        "voice-capture-mcp"
+      ]
+    }
+  }
+}
+```
+
+**Vanuit een lokaal pad**:
+```json
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "/absolute/path/to/voice_capture",
+        "voice-capture-mcp"
+      ]
+    }
+  }
+}
+```
+
+Op Windows met lokaal pad:
+```json
+{
+  "mcpServers": {
+    "voice-capture": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "C:\\Users\\naam\\git\\voice_capture",
+        "voice-capture-mcp"
+      ]
+    }
+  }
+}
+```
+
+**Vereisten voor uvx**:
+- Installeer `uv`: https://docs.astral.sh/uv/getting-started/installation/
+- `uvx` moet beschikbaar zijn in je PATH
+
+---
+
+### Optie 2: Via lokale Python environment
+
+Als je het project al lokaal hebt geïnstalleerd met een virtual environment:
+
+**macOS/Linux**:
 ```json
 {
   "mcpServers": {
@@ -151,9 +233,7 @@ Bestand: `~/Library/Application Support/Claude/claude_desktop_config.json`
 }
 ```
 
-### Windows
-Bestand: `%APPDATA%\Claude\claude_desktop_config.json`
-
+**Windows**:
 ```json
 {
   "mcpServers": {
@@ -165,24 +245,12 @@ Bestand: `%APPDATA%\Claude\claude_desktop_config.json`
 }
 ```
 
-### Linux
-Bestand: `~/.config/Claude/claude_desktop_config.json`
+---
 
-```json
-{
-  "mcpServers": {
-    "voice-capture": {
-      "command": "/absolute/path/to/voice_capture/env/bin/python",
-      "args": ["/absolute/path/to/voice_capture/mcp_server.py"]
-    }
-  }
-}
-```
+### Belangrijke opmerkingen
 
-**Belangrijk**:
-- Vervang `/absolute/path/to/voice_capture` door het volledige pad naar je project directory
-- Gebruik het Python executable **uit het virtual environment** (`env/bin/python` of `env\Scripts\python.exe`)
-- Op Windows gebruik je backslashes (`\`) of forward slashes met dubbele escaping (`\\`)
+- Vervang paden door je eigen absolute paden
+- Op Windows gebruik je backslashes (`\`) met dubbele escaping (`\\`) in JSON
 - Herstart Claude Desktop na het wijzigen van de configuratie
 
 **Tip**: Om je absolute pad te vinden:

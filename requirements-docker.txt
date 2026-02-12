@@ -4,13 +4,6 @@
 # Whisper for speech recognition
 openai-whisper
 
-# Numerical computing (may already be in base image, but included for safety)
-numpy
-
-# Optional: Transformers and audio processing
-transformers
-pyannote.audio
-
 # API servers (for MCP/OpenAPI servers)
 fastapi
 uvicorn[standard]
