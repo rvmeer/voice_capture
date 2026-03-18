@@ -567,7 +567,12 @@ class VoiceCapture(QObject):
         # Get next segment
         segment_file, segment_num = self.segments_to_transcribe.pop(0)
 
-        logger.info(f"Transcribing segment {segment_num}...")
+        # Count total segments in recording directory
+        rec_dir = self.base_recordings_dir / f"recording_{self.current_recording_id}"
+        segments_dir = rec_dir / "segments"
+        total_segments = len(list(segments_dir.glob("segment_*.wav"))) if segments_dir.exists() else 0
+
+        logger.info(f"Transcribing segment {segment_num}/{total_segments}...")
 
         # Start transcription in background thread
         thread = threading.Thread(
