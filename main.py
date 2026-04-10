@@ -821,24 +821,39 @@ class VoiceCapture(QObject):
         self.pending_recording_name = None
 
     def start_retranscription(self, recording_id):
-        """Start retranscription of a recording using the full audio file"""
+        """Start retranscription of a recording using segments or full audio file"""
         logger.info(f"Starting retranscription of recording {recording_id} with model {self.selected_model_name}")
 
         # Get recording metadata
         recording = self.recording_manager.get_recording(recording_id)
         if not recording:
             logger.error(f"Recording {recording_id} not found")
-            QMessageBox.warning(None, "Fout", "Opname niet gevonden.")
+            # Use signal to show error on main thread
+            QTimer.singleShot(0, lambda: QMessageBox.warning(None, "Fout", "Opname niet gevonden."))
             return
 
-        # Find the main audio file
+        # Find the recording directory
         rec_dir = self.base_recordings_dir / f"recording_{recording_id}"
         audio_file = rec_dir / f"recording_{recording_id}.wav"
+        segments_dir = rec_dir / "segments"
 
-        if not audio_file.exists():
-            logger.error(f"Audio file not found for recording {recording_id}")
-            QMessageBox.warning(None, "Fout", "Audio bestand niet gevonden voor deze opname.")
-            return
+        # Check if we should use segments or main file
+        use_segments = False
+        if not audio_file.exists() or audio_file.stat().st_size == 0:
+            # Main file doesn't exist or is empty - check for segments
+            if segments_dir.exists():
+                segment_files = sorted(segments_dir.glob("segment_*.wav"))
+                if segment_files:
+                    logger.info(f"Main audio file is missing/empty, will use {len(segment_files)} segments for retranscription")
+                    use_segments = True
+                else:
+                    logger.error(f"No segments found for recording {recording_id}")
+                    QTimer.singleShot(0, lambda: QMessageBox.warning(None, "Fout", "Geen audio bestanden gevonden voor deze opname."))
+                    return
+            else:
+                logger.error(f"Audio file not found and no segments for recording {recording_id}")
+                QTimer.singleShot(0, lambda: QMessageBox.warning(None, "Fout", "Geen audio bestanden gevonden voor deze opname."))
+                return
 
         # Set current recording ID for retranscription
         self.current_recording_id = recording_id
@@ -852,23 +867,73 @@ class VoiceCapture(QObject):
                 model_name = self.selected_model_name
                 if model_name not in self.loaded_models:
                     logger.error(f"Model {model_name} not loaded yet")
-                    QMessageBox.warning(None, "Fout", f"Model {model_name} is nog niet geladen. Probeer later opnieuw.")
+                    # Use signal to show error on main thread
+                    QTimer.singleShot(0, lambda: QMessageBox.warning(None, "Fout", f"Model {model_name} is nog niet geladen. Probeer later opnieuw."))
                     return
 
                 model = self.loaded_models[model_name]
-                logger.info(f"Transcribing full audio file {audio_file} with {model_name} model...")
 
-                # Transcribe the full audio file
-                result = model.transcribe(
-                    str(audio_file),
-                    language="nl",
-                    task="transcribe",
-                    fp16=False,
-                    verbose=False
-                )
+                if use_segments:
+                    # Transcribe each segment and combine
+                    logger.info(f"Retranscribing {len(segment_files)} segments with {model_name} model...")
 
-                transcription_text = result["text"].strip()
-                logger.info(f"Retranscription complete: {len(transcription_text)} chars")
+                    segment_texts = []
+                    for i, segment_file in enumerate(segment_files):
+                        logger.info(f"Transcribing segment {i+1}/{len(segment_files)}: {segment_file.name}")
+
+                        # Check if segment has sufficient duration
+                        import wave
+                        try:
+                            with wave.open(str(segment_file), 'rb') as wf:
+                                frames = wf.getnframes()
+                                rate = wf.getframerate()
+                                duration = frames / float(rate)
+
+                                if duration < 0.1:
+                                    logger.warning(f"Segment {i} too short ({duration:.2f}s), skipping")
+                                    continue
+                        except Exception as e:
+                            logger.error(f"Error checking segment {i}: {e}")
+                            continue
+
+                        # Transcribe segment
+                        result = model.transcribe(
+                            str(segment_file),
+                            language="nl",
+                            task="transcribe",
+                            fp16=False,
+                            verbose=False
+                        )
+
+                        text = result["text"].strip()
+                        if text:
+                            if len(segment_texts) == 0:
+                                # First segment
+                                segment_texts.append(text)
+                            else:
+                                # Remove overlap with previous segment
+                                from transcription_utils import remove_overlap
+                                previous_text = segment_texts[-1]
+                                deduplicated_text = remove_overlap(previous_text, text)
+                                if deduplicated_text.strip():
+                                    segment_texts.append(deduplicated_text)
+
+                    transcription_text = " ".join(segment_texts)
+                    logger.info(f"Retranscription complete from segments: {len(transcription_text)} chars")
+                else:
+                    # Use main audio file
+                    logger.info(f"Transcribing full audio file {audio_file} with {model_name} model...")
+
+                    result = model.transcribe(
+                        str(audio_file),
+                        language="nl",
+                        task="transcribe",
+                        fp16=False,
+                        verbose=False
+                    )
+
+                    transcription_text = result["text"].strip()
+                    logger.info(f"Retranscription complete: {len(transcription_text)} chars")
 
                 # Save new transcription to file
                 transcription_file = rec_dir / f"transcription_{recording_id}.txt"
@@ -884,18 +949,22 @@ class VoiceCapture(QObject):
 
                 logger.info(f"Updated recording {recording_id} with new transcription and model {model_name}")
 
-                # Show completion notification
-                if hasattr(self, 'tray_icon'):
-                    self.tray_icon.showMessage(
-                        "Hertranscriptie Voltooid",
-                        f"Opname hertranscribeerd met {model_name}: {len(transcription_text)} tekens",
-                        QSystemTrayIcon.MessageIcon.Information,
-                        3000
-                    )
+                # Show completion notification on main thread
+                def show_completion():
+                    if hasattr(self, 'tray_icon'):
+                        self.tray_icon.showMessage(
+                            "Hertranscriptie Voltooid",
+                            f"Opname hertranscribeerd met {model_name}: {len(transcription_text)} tekens",
+                            QSystemTrayIcon.MessageIcon.Information,
+                            3000
+                        )
+                QTimer.singleShot(0, show_completion)
 
             except Exception as e:
                 logger.error(f"Error during retranscription: {e}", exc_info=True)
-                QMessageBox.critical(None, "Fout", f"Fout bij hertranscriberen: {str(e)}")
+                # Use signal to show error on main thread
+                error_msg = str(e)
+                QTimer.singleShot(0, lambda: QMessageBox.critical(None, "Fout", f"Fout bij hertranscriberen: {error_msg}"))
             finally:
                 # Reset current recording ID
                 self.current_recording_id = None
