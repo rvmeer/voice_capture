@@ -105,9 +105,28 @@ def diarize_recording(args):
 
     logger.info(f"Performing speaker diarization...")
 
+    # Get speaker count parameters
+    num_speakers = args.num_speakers if hasattr(args, 'num_speakers') else None
+    min_speakers = args.min_speakers if hasattr(args, 'min_speakers') else None
+    max_speakers = args.max_speakers if hasattr(args, 'max_speakers') else None
+
     try:
+        # Prepare diarization parameters
+        diarization_params = {}
+
+        if num_speakers is not None:
+            diarization_params['num_speakers'] = num_speakers
+            logger.info(f"  Using exact number of speakers: {num_speakers}")
+        else:
+            if min_speakers is not None:
+                diarization_params['min_speakers'] = min_speakers
+                logger.info(f"  Minimum speakers: {min_speakers}")
+            if max_speakers is not None:
+                diarization_params['max_speakers'] = max_speakers
+                logger.info(f"  Maximum speakers: {max_speakers}")
+
         # Perform diarization
-        output = pipeline(str(audio_file))
+        output = pipeline(str(audio_file), **diarization_params)
 
         # Prepare output
         output_lines = []
@@ -153,8 +172,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  diarization.py <recording_id>                      Perform speaker diarization
-  diarization.py <recording_id> --hf-token TOKEN     Use HuggingFace token for authentication
+  diarization.py <recording_id>                           Perform speaker diarization
+  diarization.py <recording_id> --hf-token TOKEN          Use HuggingFace token for authentication
+  diarization.py <recording_id> --num-speakers 2          Specify exactly 2 speakers
+  diarization.py <recording_id> --max-speakers 3          Maximum 3 speakers
+  diarization.py <recording_id> --min-speakers 2 --max-speakers 4  Between 2-4 speakers
 
 Note: This tool requires pyannote.audio and a HuggingFace account.
 You must accept the model license at:
@@ -170,6 +192,21 @@ The HF_TOKEN will be automatically loaded from the .env file if present.
         '--hf-token',
         help='HuggingFace authentication token (or set HF_TOKEN env var)',
         default=None
+    )
+    parser.add_argument(
+        '--num-speakers',
+        type=int,
+        help='Exact number of speakers (if known)'
+    )
+    parser.add_argument(
+        '--min-speakers',
+        type=int,
+        help='Minimum number of speakers'
+    )
+    parser.add_argument(
+        '--max-speakers',
+        type=int,
+        help='Maximum number of speakers'
     )
 
     args = parser.parse_args()

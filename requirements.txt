@@ -5,6 +5,17 @@ fastapi
 uvicorn[standard]
 pydantic
 mcp
+python-dotenv
+
+# Optional: MLX Whisper for Apple Silicon (much faster on M1/M2/M3)
+# Only works on macOS with Apple Silicon
+# mlx-whisper
+
+# Optional: Speaker diarization
+# Requires accepting user agreements at:
+# - https://huggingface.co/pyannote/speaker-diarization-3.1
+# - https://huggingface.co/pyannote/segmentation-3.0
+# pyannote.audio
 
 # PyTorch wordt apart geïnstalleerd - zie README.md voor instructies:
 # - macOS/Linux: pip install torch

@@ -183,6 +183,10 @@ def perform_diarization(audio_file, rec_dir, hf_token=None, num_speakers=None, m
 
     Returns:
         Path to diarization.txt file
+
+    Note:
+        The speaker-diarization-3.1 pipeline does not support min_duration_on/min_duration_off
+        parameters. Speaker segment filtering must be done in post-processing if needed.
     """
     # Import pyannote.audio
     try:
@@ -408,85 +412,117 @@ def retranscribe_recording(args):
         logger.info(f"Loaded {len(diarization_segments)} diarization segments")
         logger.info("")
 
-    # Detect best available device
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif torch.backends.mps.is_available():
-        device = "mps"
+    # Check if using MLX Whisper
+    use_mlx = model_name.startswith('mlx-')
+
+    if use_mlx:
+        # MLX Whisper path
+        try:
+            import mlx_whisper
+        except ImportError:
+            logger.error("mlx-whisper is not installed. Please install it with:")
+            logger.error("  pip install mlx-whisper")
+            sys.exit(1)
+
+        # Extract the actual model size from mlx-* format
+        mlx_model_size = model_name.replace('mlx-', '')
+        logger.info(f"Loading MLX Whisper {mlx_model_size} model (optimized for Apple Silicon)...")
+
+        logger.info(f"Transcribing with MLX Whisper {mlx_model_size} model...")
+        try:
+            # MLX Whisper transcription
+            # MLX supports word_timestamps and works well on Apple Silicon/MPS
+            result = mlx_whisper.transcribe(
+                str(audio_file),
+                path_or_hf_repo=f"mlx-community/whisper-{mlx_model_size}-mlx",
+                language="nl",
+                word_timestamps=use_diarization,
+                verbose=False
+            )
+        except Exception as e:
+            logger.error(f"Error during MLX transcription: {e}")
+            logger.error(f"Error transcribing {recording_id}: {e}", exc_info=True)
+            sys.exit(1)
     else:
-        device = "cpu"
-
-    logger.info(f"Loading {model_name} model on {device}...")
-    try:
-        model = whisper.load_model(model_name, device=device)
-    except Exception as e:
-        logger.error(f"Error loading model: {e}")
-        sys.exit(1)
-
-    logger.info(f"Transcribing with {model_name} model...")
-    try:
-        # Transcribe the full audio file
-        # If using diarization, we need word-level timestamps
-        # Note: word_timestamps with MPS can cause issues, so we force CPU for that case
-        if use_diarization and device == "mps":
-            logger.info("Word timestamps requested - temporarily using CPU for compatibility...")
-            # Reload model on CPU for word timestamp support
-            model_cpu = whisper.load_model(model_name, device="cpu")
-            result = model_cpu.transcribe(
-                str(audio_file),
-                language="nl",
-                task="transcribe",
-                fp16=False,
-                verbose=False,
-                word_timestamps=True
-            )
+        # Original Whisper path
+        # Detect best available device
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
         else:
-            result = model.transcribe(
-                str(audio_file),
-                language="nl",
-                task="transcribe",
-                fp16=False,  # Avoid NaN on MPS
-                verbose=False,
-                word_timestamps=use_diarization  # Enable word timestamps for diarization
-            )
+            device = "cpu"
 
-        # Format transcription based on diarization
-        if use_diarization and diarization_segments:
-            # Use segments from transcription result
-            segments = result.get("segments", [])
-            logger.info(f"Processing {len(segments)} transcription segments with speaker diarization...")
-            transcription_text = format_transcription_with_speakers(segments, diarization_segments)
-        else:
-            # Use plain text
-            transcription_text = result["text"].strip()
+        logger.info(f"Loading {model_name} model on {device}...")
+        try:
+            model = whisper.load_model(model_name, device=device)
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+            sys.exit(1)
 
-        if not transcription_text:
-            logger.warning("Transcription is empty.")
-        else:
-            logger.info(f"Transcription complete: {len(transcription_text)} characters")
+        logger.info(f"Transcribing with {model_name} model...")
+        try:
+            # Transcribe the full audio file
+            # If using diarization, we need word-level timestamps
+            # Note: word_timestamps with MPS can cause issues, so we force CPU for that case
+            if use_diarization and device == "mps":
+                logger.info("Word timestamps requested - temporarily using CPU for compatibility...")
+                # Reload model on CPU for word timestamp support
+                model_cpu = whisper.load_model(model_name, device="cpu")
+                result = model_cpu.transcribe(
+                    str(audio_file),
+                    language="nl",
+                    task="transcribe",
+                    fp16=False,
+                    verbose=False,
+                    word_timestamps=True
+                )
+            else:
+                result = model.transcribe(
+                    str(audio_file),
+                    language="nl",
+                    task="transcribe",
+                    fp16=False,  # Avoid NaN on MPS
+                    verbose=False,
+                    word_timestamps=use_diarization  # Enable word timestamps for diarization
+                )
+        except Exception as e:
+            logger.error(f"Error during transcription: {e}")
+            logger.error(f"Error transcribing {recording_id}: {e}", exc_info=True)
+            sys.exit(1)
 
-        # Save new transcription
-        transcription_file = rec_dir / f"transcription_{recording_id}.txt"
-        with open(transcription_file, 'w', encoding='utf-8') as f:
-            f.write(transcription_text)
+    # Format transcription based on diarization (common for both MLX and regular Whisper)
+    if use_diarization and diarization_segments:
+        # Use segments from transcription result
+        segments = result.get("segments", [])
+        logger.info(f"Processing {len(segments)} transcription segments with speaker diarization...")
+        transcription_text = format_transcription_with_speakers(segments, diarization_segments)
+    else:
+        # Use plain text
+        transcription_text = result["text"].strip()
 
-        logger.info(f"Saved transcription to: {transcription_file}")
+    if not transcription_text:
+        logger.warning("Transcription is empty.")
+    else:
+        logger.info(f"Transcription complete: {len(transcription_text)} characters")
 
-        # Update recording metadata with new transcription and model
-        manager.update_recording(
-            recording_id,
-            transcription=transcription_text,
-            model=model_name
-        )
+    # Save new transcription
+    transcription_file = rec_dir / f"transcription_{recording_id}.txt"
+    with open(transcription_file, 'w', encoding='utf-8') as f:
+        f.write(transcription_text)
 
-        logger.info(f"Updated recording metadata with new model: {model_name}")
-        logger.info("")
-        logger.info("Retranscription complete!")
+    logger.info(f"Saved transcription to: {transcription_file}")
 
-    except Exception as e:
-        logger.error(f"Error during transcription: {e}")
-        logger.error(f"Error retranscribing {recording_id}: {e}", exc_info=True)
-        sys.exit(1)
+    # Update recording metadata with new transcription and model
+    manager.update_recording(
+        recording_id,
+        transcription=transcription_text,
+        model=model_name
+    )
+
+    logger.info(f"Updated recording metadata with new model: {model_name}")
+    logger.info("")
+    logger.info("Retranscription complete!")
 
 
 def main():
@@ -496,15 +532,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  recordings.py list                                    List all recordings (oldest first)
-  recordings.py list --reverse                          List all recordings (newest first)
-  recordings.py show <id>                               Show details of a specific recording
-  recordings.py retranscribe <id>                       Retranscribe with medium model
-  recordings.py retranscribe <id> --model large         Retranscribe with large model
-  recordings.py retranscribe <id> --diarization         Retranscribe with speaker diarization
-  recordings.py retranscribe <id> -d -m large           Retranscribe with diarization and large model
-  recordings.py retranscribe <id> -d --num-speakers 2   Retranscribe with exactly 2 speakers
-  recordings.py retranscribe <id> -d --max-speakers 3   Retranscribe with max 3 speakers
+  recordings.py list                                       List all recordings (oldest first)
+  recordings.py list --reverse                             List all recordings (newest first)
+  recordings.py show <id>                                  Show details of a specific recording
+  recordings.py retranscribe <id>                          Retranscribe with medium model
+  recordings.py retranscribe <id> --model large            Retranscribe with large model
+  recordings.py retranscribe <id> --model mlx-medium       Retranscribe with MLX Whisper (Apple Silicon)
+  recordings.py retranscribe <id> --diarization            Retranscribe with speaker diarization
+  recordings.py retranscribe <id> -d -m large              Retranscribe with diarization and large model
+  recordings.py retranscribe <id> -d -m mlx-large          Retranscribe with MLX and diarization
+  recordings.py retranscribe <id> -d --num-speakers 2      Retranscribe with exactly 2 speakers
+  recordings.py retranscribe <id> -d --max-speakers 3      Retranscribe with max 3 speakers
         """
     )
 
@@ -530,8 +568,8 @@ Examples:
     retranscribe_parser.add_argument(
         '--model', '-m',
         default='medium',
-        choices=['tiny', 'small', 'medium', 'large'],
-        help='Whisper model to use (default: medium)'
+        choices=['tiny', 'small', 'medium', 'large', 'mlx-tiny', 'mlx-small', 'mlx-medium', 'mlx-large'],
+        help='Whisper model to use (default: medium). Use mlx-* for MLX Whisper on Apple Silicon'
     )
     retranscribe_parser.add_argument(
         '--diarization', '-d',

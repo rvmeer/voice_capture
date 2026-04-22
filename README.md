@@ -10,6 +10,8 @@ Een professionele tray-only desktop applicatie voor het opnemen en transcriberen
 ✅ **System Tray Interface** - Volledige bediening via system tray icoon
 ✅ **Click-to-Record** - Eén klik om opname te starten/stoppen
 ✅ **Multiple Whisper Models** - Keuze uit tiny/small/medium/large modellen
+✅ **MLX Whisper Support** - Supersnelle transcriptie op Apple Silicon (M1/M2/M3/M4)
+✅ **Speaker Diarization** - Identificeert automatisch wie spreekt in gesprekken
 ✅ **Live Transcriptie** - Incrementele transcriptie tijdens opname (segmented)
 ✅ **Audio Input Selection** - Kies je microfoon/audio input via tray menu
 ✅ **Nederlandse Taal** - Geoptimaliseerd voor Nederlands
@@ -17,6 +19,7 @@ Een professionele tray-only desktop applicatie voor het opnemen en transcriberen
 ✅ **Empty Recording Detection** - Automatisch verwijderen van lege opnames
 ✅ **Model Caching** - Gekozen modellen blijven in geheugen voor snelheid
 ✅ **Configurable Segments** - Instelbare segment lengte en overlap
+✅ **CLI Tools** - Beheer opnames via command line (retranscribe, diarization)
 ✅ **FastAPI Server** - Volledige API toegang tot opnames
 ✅ **MCP Server** - Claude Desktop integratie
 
@@ -73,7 +76,46 @@ pip install torch
 python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
 ```
 
-**Let op**: Er is geen `.env` bestand of configuratie nodig. Alle instellingen worden gedaan via het tray menu.
+### 4. Optionele Features (Advanced)
+
+Voor geavanceerde features zoals speaker diarization en MLX Whisper:
+
+```bash
+pip install -r requirements-optional.txt
+```
+
+**MLX Whisper** (alleen Apple Silicon - M1/M2/M3/M4):
+- Veel sneller dan standaard Whisper op Apple Silicon
+- Volledig compatibel met diarization en word timestamps
+- Werkt direct op MPS zonder CPU fallback
+- Gebruik: `python recordings.py retranscribe <id> --model mlx-medium`
+
+**Speaker Diarization** (identificeert wie spreekt):
+- Detecteert automatisch sprekers in audio
+- Vereist HuggingFace account en token
+- Accepteer eerst de user agreements:
+  - https://huggingface.co/pyannote/speaker-diarization-3.1
+  - https://huggingface.co/pyannote/segmentation-3.0
+- Stel HF_TOKEN environment variabele in (of maak `.env` bestand):
+  ```bash
+  export HF_TOKEN="your-huggingface-token"
+  # Of maak een .env bestand met: HF_TOKEN=your-huggingface-token
+  ```
+- Basis gebruik: `python recordings.py retranscribe <id> --diarization`
+- Met model keuze: `python recordings.py retranscribe <id> -d -m mlx-large --num-speakers 2`
+- **Speaker configuratie**:
+  ```bash
+  # Exact aantal speakers (als bekend)
+  python recordings.py retranscribe <id> -d --num-speakers 3
+
+  # Bereik van speakers
+  python recordings.py retranscribe <id> -d --min-speakers 2 --max-speakers 4
+
+  # Combinatie met MLX model
+  python recordings.py retranscribe <id> -d -m mlx-large --num-speakers 2
+  ```
+
+**Let op**: Er is geen `.env` bestand of configuratie nodig voor basis functionaliteit. Alle instellingen worden gedaan via het tray menu.
 
 ## Gebruik
 
