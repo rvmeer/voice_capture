@@ -6,8 +6,12 @@ Provides access to recordings, metadata, and transcriptions via MCP protocol
 
 import json
 import asyncio
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Any
+
+INTERNAL_API_BASE = "http://127.0.0.1:5151"
 from mcp.server.models import InitializationOptions
 from mcp.server import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
@@ -214,7 +218,25 @@ async def handle_list_tools() -> list[Tool]:
                 },
                 "required": ["recording_id", "new_title"]
             }
-        )
+        ),
+        Tool(
+            name="start_recording",
+            description="Start a new voice recording in the Voice Capture app. The menu bar icon will turn red to indicate recording is active. Returns an error if the app is not running or recording is already in progress.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
+        Tool(
+            name="stop_recording",
+            description="Stop the current voice recording in the Voice Capture app. The menu bar icon will return to its idle state and transcription will begin. Returns an error if the app is not running or no recording is active.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
     ]
 
 
@@ -389,6 +411,55 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
                     text=json.dumps({"error": f"Recording with id '{recording_id}' not found"})
                 )
             ]
+
+    elif name in ("start_recording", "stop_recording"):
+        endpoint = "/start" if name == "start_recording" else "/stop"
+
+        def api_call(method, path):
+            url = INTERNAL_API_BASE + path
+            req = urllib.request.Request(url, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.URLError:
+                return None
+
+        loop = asyncio.get_event_loop()
+
+        # Check current status
+        status = await loop.run_in_executor(None, lambda: api_call("GET", "/status"))
+        if status is None:
+            return [TextContent(type="text", text=json.dumps({
+                "error": "Voice Capture app is not running"
+            }))]
+
+        # Guard against no-ops
+        if name == "start_recording" and status.get("is_recording"):
+            return [TextContent(type="text", text=json.dumps({
+                "success": False,
+                "message": "Already recording",
+                "status": status
+            }))]
+        if name == "stop_recording" and not status.get("is_recording"):
+            return [TextContent(type="text", text=json.dumps({
+                "success": False,
+                "message": "Not currently recording",
+                "status": status
+            }))]
+
+        # Send start/stop command
+        result = await loop.run_in_executor(None, lambda: api_call("POST", endpoint))
+        if result is None:
+            return [TextContent(type="text", text=json.dumps({
+                "error": "Voice Capture app did not respond"
+            }))]
+
+        verb = "started" if name == "start_recording" else "stopped"
+        return [TextContent(type="text", text=json.dumps({
+            "success": result.get("success", False),
+            "message": f"Recording {verb}",
+            "status": result
+        }))]
 
     else:
         return [

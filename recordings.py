@@ -435,7 +435,7 @@ def retranscribe_recording(args):
             result = mlx_whisper.transcribe(
                 str(audio_file),
                 path_or_hf_repo=f"mlx-community/whisper-{mlx_model_size}-mlx",
-                language="nl",
+
                 word_timestamps=use_diarization,
                 verbose=False
             )
@@ -471,7 +471,7 @@ def retranscribe_recording(args):
                 model_cpu = whisper.load_model(model_name, device="cpu")
                 result = model_cpu.transcribe(
                     str(audio_file),
-                    language="nl",
+    
                     task="transcribe",
                     fp16=False,
                     verbose=False,
@@ -480,7 +480,7 @@ def retranscribe_recording(args):
             else:
                 result = model.transcribe(
                     str(audio_file),
-                    language="nl",
+    
                     task="transcribe",
                     fp16=False,  # Avoid NaN on MPS
                     verbose=False,

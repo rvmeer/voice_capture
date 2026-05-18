@@ -5,6 +5,8 @@ Clean implementation using composition pattern with tray_actions
 """
 
 import sys
+import json
+import queue
 import signal
 import threading
 import shutil
@@ -12,6 +14,9 @@ import platform
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+INTERNAL_API_PORT = 5151
 
 import whisper
 import torch
@@ -130,6 +135,97 @@ def create_tray_icon(recording=False):
     return QIcon(pixmap)
 
 
+class CommandBridge(QObject):
+    """Thread-safe bridge to run callbacks on the Qt main thread via signals"""
+    _trigger = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self._queue = queue.Queue()
+        self._trigger.connect(self._process, Qt.ConnectionType.QueuedConnection)
+
+    def run(self, func, timeout=5):
+        result_event = threading.Event()
+        result_container = [None]
+
+        def wrapper():
+            try:
+                result_container[0] = func()
+            except Exception as e:
+                result_container[0] = {"error": str(e)}
+            finally:
+                result_event.set()
+
+        self._queue.put(wrapper)
+        self._trigger.emit()
+        result_event.wait(timeout=timeout)
+        return result_container[0]
+
+    def _process(self):
+        try:
+            self._queue.get_nowait()()
+        except queue.Empty:
+            pass
+
+
+class RecordingAPIHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP API handler for MCP server communication"""
+    voice_capture = None
+    bridge = None
+
+    def log_message(self, format, *args):
+        pass  # Suppress default HTTP access logging
+
+    def _respond(self, code, data):
+        body = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path != "/status":
+            self._respond(404, {"error": "Not found"})
+            return
+        vc = RecordingAPIHandler.voice_capture
+        self._respond(200, {
+            "is_recording": vc.is_recording if vc else False,
+            "recording_id": vc.current_recording_id if vc else None,
+        })
+
+    def do_POST(self):
+        if self.path not in ("/start", "/stop"):
+            self._respond(404, {"error": "Not found"})
+            return
+
+        vc = RecordingAPIHandler.voice_capture
+        bridge = RecordingAPIHandler.bridge
+        if vc is None or bridge is None:
+            self._respond(503, {"error": "App not ready"})
+            return
+
+        action = self.path[1:]  # "start" or "stop"
+
+        def execute():
+            if action == "start" and not vc.is_recording:
+                vc.on_tray_toggle_recording()
+            elif action == "stop" and vc.is_recording:
+                vc.on_tray_toggle_recording()
+            return {
+                "success": True,
+                "is_recording": vc.is_recording,
+                "recording_id": vc.current_recording_id,
+            }
+
+        result = bridge.run(execute)
+
+        if result is None:
+            self._respond(504, {"error": "Timeout waiting for Qt main thread"})
+        else:
+            self._respond(200, result)
+
+
 class VoiceCapture(QObject):
     """Voice Capture application - tray-only mode using composition"""
 
@@ -187,6 +283,14 @@ class VoiceCapture(QObject):
 
         # Load default model on startup
         QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
+
+        # Start internal HTTP API for MCP server communication
+        RecordingAPIHandler.voice_capture = self
+        RecordingAPIHandler.bridge = CommandBridge()
+        api_server = HTTPServer(("127.0.0.1", INTERNAL_API_PORT), RecordingAPIHandler)
+        api_thread = threading.Thread(target=api_server.serve_forever, daemon=True)
+        api_thread.start()
+        logger.info(f"Internal API server started on 127.0.0.1:{INTERNAL_API_PORT}")
 
     def init_tray_icon(self):
         """Initialize system tray icon and menu (GUI)"""
@@ -619,7 +723,7 @@ class VoiceCapture(QObject):
             # Transcribe with fp16=False to avoid NaN issues on MPS
             result = model.transcribe(
                 audio_file,
-                language="nl",
+
                 task="transcribe",
                 fp16=False,
                 verbose=False  # Suppress whisper output
@@ -899,7 +1003,7 @@ class VoiceCapture(QObject):
                         # Transcribe segment
                         result = model.transcribe(
                             str(segment_file),
-                            language="nl",
+            
                             task="transcribe",
                             fp16=False,
                             verbose=False
@@ -926,7 +1030,7 @@ class VoiceCapture(QObject):
 
                     result = model.transcribe(
                         str(audio_file),
-                        language="nl",
+        
                         task="transcribe",
                         fp16=False,
                         verbose=False
