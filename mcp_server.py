@@ -23,11 +23,7 @@ setup_logging(enable_console=False)
 
 # Import recording manager for title updates (after logging is configured)
 from recording_manager import RecordingManager
-from transcription_utils import (
-    remove_overlap,
-    get_transcription_metadata,
-    get_chunk_by_index
-)
+from transcription_utils import remove_overlap
 
 logger = get_logger(__name__)
 
@@ -175,27 +171,13 @@ async def handle_list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_transcription",
-            description="Get the full transcription text for a specific recording by ID. Warning: For long recordings (30+ minutes), this returns the complete text which may cause context overflow. Consider using get_transcription_summary first to understand the scope, then get_transcription_chunked to retrieve specific sections.",
+            description="Get the full transcription text for a specific recording by ID.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "recording_id": {
                         "type": "string",
                         "description": "The ID (timestamp) of the recording to retrieve transcription for"
-                    }
-                },
-                "required": ["recording_id"]
-            }
-        ),
-        Tool(
-            name="get_transcription_summary",
-            description="Get metadata and summary information about a transcription without loading the full text. This uses context engineering principles to front-load critical information. Returns: word count, duration, estimated reading time, detected speakers, first ~500 words (preview), last ~500 words (conclusions), and total number of available chunks. Use this FIRST before loading full transcriptions to understand scope and structure.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "recording_id": {
-                        "type": "string",
-                        "description": "The ID (timestamp) of the recording to retrieve summary for"
                     }
                 },
                 "required": ["recording_id"]
@@ -322,51 +304,6 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             TextContent(
                 type="text",
                 text=transcription
-            )
-        ]
-
-    elif name == "get_transcription_summary":
-        # Get transcription summary with metadata
-        recording_id = arguments.get("recording_id")
-
-        if not recording_id:
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps({"error": "recording_id is required"})
-                )
-            ]
-
-        # Get the full transcription text
-        transcription = get_transcription_text(recording_id)
-
-        if transcription is None:
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps({"error": f"Transcription for recording '{recording_id}' not found"})
-                )
-            ]
-
-        # Get recording metadata for duration (can be ISO 8601 format or seconds)
-        recording = get_recording_by_id(recording_id)
-        duration = recording.get("duration") if recording else None
-
-        # Extract metadata (handles both ISO 8601 and numeric duration)
-        metadata = get_transcription_metadata(transcription, duration)
-
-        # Add recording context
-        result = {
-            "recording_id": recording_id,
-            "recording_name": recording.get("name") if recording else "Unknown",
-            "recording_date": recording.get("date") if recording else "Unknown",
-            **metadata
-        }
-
-        return [
-            TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, ensure_ascii=False)
             )
         ]
 
