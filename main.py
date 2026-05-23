@@ -36,7 +36,7 @@ try:
 except ImportError:
     def get_version_string():
         return "unknown"
-from transcription_utils import remove_overlap
+from transcription_utils import remove_overlap, is_empty_segment
 from tray_actions import TrayActions
 
 # Setup logging
@@ -269,6 +269,10 @@ class VoiceCapture(QObject):
 
         # Track pending recording name (set when recording stops)
         self.pending_recording_name = None
+
+        # Track consecutive empty segments for silence detection
+        self.consecutive_empty_segments = 0
+        self.empty_segment_warning_shown = False
 
         # Settings
         self.segment_duration = 10  # seconds
@@ -657,6 +661,8 @@ class VoiceCapture(QObject):
         # Clear previous segments
         self.segments_to_transcribe = []
         self.transcribed_segments = []
+        self.consecutive_empty_segments = 0
+        self.empty_segment_warning_shown = False
 
         # Set segment settings on recorder
         self.recorder.segment_duration = self.segment_duration
@@ -803,6 +809,21 @@ class VoiceCapture(QObject):
     def on_segment_transcribed(self, text, segment_num):
         """Handle segment transcription complete"""
         logger.debug(f"Segment {segment_num} transcription complete")
+
+        if is_empty_segment(text):
+            self.consecutive_empty_segments += 1
+            logger.debug(f"Empty segment {segment_num}, consecutive empty: {self.consecutive_empty_segments}")
+            if self.consecutive_empty_segments >= 5 and not self.empty_segment_warning_shown:
+                self.empty_segment_warning_shown = True
+                QMessageBox.warning(
+                    None,
+                    "Geen audio gedetecteerd",
+                    "Er zijn 5 opeenvolgende segmenten zonder transcriptie.\n\n"
+                    "Controleer of uw microfoon correct werkt en geluid opneemt.",
+                    QMessageBox.StandardButton.Ok
+                )
+        else:
+            self.consecutive_empty_segments = 0
 
     def check_and_finalize_recording(self):
         """Check if all segments are transcribed and finalize recording"""

@@ -8,6 +8,19 @@ from logging_config import get_logger
 logger = get_logger(__name__)
 
 
+WHISPER_SILENCE_HALLUCINATIONS = {"Thank you.", "you", "You"}
+
+
+def is_empty_segment(text: str) -> bool:
+    """Return True if a transcription segment contains no real content.
+
+    Covers both truly empty segments and known Whisper silence hallucinations.
+    """
+    if not text or not text.strip():
+        return True
+    return text.strip() in WHISPER_SILENCE_HALLUCINATIONS
+
+
 def remove_overlap(previous_text: str, new_text: str) -> str:
     """Remove overlapping text between segments"""
     if not previous_text or not new_text:
