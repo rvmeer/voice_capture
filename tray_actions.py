@@ -84,8 +84,8 @@ class TrayActions:
             # Update selected model
             self.app.selected_model_name = model_name
 
-            # Load model if not already loaded
-            if model_name not in self.app.loaded_models:
+            # Load model if not already loaded (skip when MLX is active)
+            if not self.app.use_mlx and model_name not in self.app.loaded_models:
                 logger.info(f"Loading {model_name} model...")
                 self.app.load_model_async(model_name)
 

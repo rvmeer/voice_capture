@@ -247,6 +247,7 @@ class VoiceCapture(QObject):
         # Model caching: store loaded models
         self.loaded_models = {}  # {model_name: model_object}
         self.selected_model_name = "medium"  # Default selected model
+        self.use_mlx = False  # Use MLX Whisper (Apple Silicon only), default off
 
         # Recording state
         self.is_recording = False
@@ -344,6 +345,12 @@ class VoiceCapture(QObject):
             self.tray_large_action.setChecked(True)
 
         self.tray_menu.addMenu(model_menu)
+
+        # MLX Whisper toggle (Apple Silicon)
+        self.tray_mlx_action = self.tray_menu.addAction("Gebruik MLX (Apple Silicon)")
+        self.tray_mlx_action.setCheckable(True)
+        self.tray_mlx_action.setChecked(False)
+        self.tray_mlx_action.triggered.connect(self.on_tray_toggle_mlx)
 
         self.tray_menu.addSeparator()
 
@@ -478,6 +485,9 @@ class VoiceCapture(QObject):
             self.tray_medium_action.setChecked(model_name == "medium")
             self.tray_large_action.setChecked(model_name == "large")
 
+            if self.use_mlx:
+                message += " (MLX)"
+
             # Show notification
             self.tray_icon.showMessage(
                 "Model Gewijzigd",
@@ -487,6 +497,34 @@ class VoiceCapture(QObject):
             )
         except Exception as e:
             QMessageBox.warning(None, "Fout", f"Kon model niet instellen: {str(e)}")
+
+    def on_tray_toggle_mlx(self):
+        """Handle MLX Whisper toggle from tray - GUI handler"""
+        try:
+            enabling = self.tray_mlx_action.isChecked()
+
+            if enabling:
+                try:
+                    import mlx_whisper  # noqa: F401
+                except ImportError:
+                    self.tray_mlx_action.setChecked(False)
+                    QMessageBox.warning(
+                        None,
+                        "MLX niet beschikbaar",
+                        "mlx-whisper is niet geïnstalleerd.\n\nInstalleer via:\n  pip install mlx-whisper"
+                    )
+                    return
+
+            self.use_mlx = enabling
+            status = "ingeschakeld" if self.use_mlx else "uitgeschakeld"
+            self.tray_icon.showMessage(
+                "MLX Whisper",
+                f"MLX (Apple Silicon) transcriptie {status}",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+        except Exception as e:
+            QMessageBox.warning(None, "Fout", f"Kon MLX niet instellen: {str(e)}")
 
     def on_tray_show_version(self):
         """Handle show version from tray - GUI handler"""
@@ -525,7 +563,8 @@ class VoiceCapture(QObject):
         layout = QVBoxLayout()
 
         # Add instruction label
-        instruction_label = QLabel(f"Selecteer een opname om te hertranscriberen met het <b>{self.selected_model_name}</b> model:")
+        effective_model_display = f"mlx-{self.selected_model_name}" if self.use_mlx else self.selected_model_name
+        instruction_label = QLabel(f"Selecteer een opname om te hertranscriberen met het <b>{effective_model_display}</b> model:")
         layout.addWidget(instruction_label)
 
         # Create list widget
@@ -579,9 +618,10 @@ class VoiceCapture(QObject):
             self.tray_actions.start_retranscription(recording_id)
 
             # Show notification
+            effective_model_notif = f"mlx-{self.selected_model_name}" if self.use_mlx else self.selected_model_name
             self.tray_icon.showMessage(
                 "Hertranscriptie Gestart",
-                f"Hertranscriberen met {self.selected_model_name} model...",
+                f"Hertranscriberen met {effective_model_notif} model...",
                 QSystemTrayIcon.MessageIcon.Information,
                 2000
             )
@@ -630,12 +670,14 @@ class VoiceCapture(QObject):
         recording_name = f"Opname {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         self.current_audio_file = str(self.base_recordings_dir / f"recording_{self.current_recording_id}" / f"recording_{self.current_recording_id}.wav")
 
+        effective_model = f"mlx-{self.selected_model_name}" if self.use_mlx else self.selected_model_name
+        logger.info(f"Transcription model: {effective_model}")
         self.recording_manager.add_recording(
             audio_file=self.current_audio_file,
             timestamp=self.current_recording_id,
             name=recording_name,
             duration=None,  # Don't set duration yet
-            model=self.selected_model_name,
+            model=effective_model,
             segment_duration=self.segment_duration,
             overlap_duration=self.overlap_duration
         )
@@ -657,15 +699,16 @@ class VoiceCapture(QObject):
             self.is_transcribing_segment = False
             return
 
-        # Get model
+        # Get model (not needed for MLX)
         model_name = self.selected_model_name
-        if model_name not in self.loaded_models:
-            # Model not loaded yet, wait
-            logger.warning(f"Model {model_name} not loaded yet, waiting...")
-            self.is_transcribing_segment = False
-            return
+        model = None
+        if not self.use_mlx:
+            if model_name not in self.loaded_models:
+                logger.warning(f"Model {model_name} not loaded yet, waiting...")
+                self.is_transcribing_segment = False
+                return
+            model = self.loaded_models[model_name]
 
-        model = self.loaded_models[model_name]
         self.is_transcribing_segment = True
 
         # Get next segment
@@ -681,12 +724,12 @@ class VoiceCapture(QObject):
         # Start transcription in background thread
         thread = threading.Thread(
             target=self.transcribe_segment_thread,
-            args=(segment_file, segment_num, model)
+            args=(segment_file, segment_num, model, self.use_mlx)
         )
         thread.daemon = True
         thread.start()
 
-    def transcribe_segment_thread(self, audio_file, segment_num, model):
+    def transcribe_segment_thread(self, audio_file, segment_num, model, use_mlx=False):
         """Transcribe a segment in a background thread"""
         try:
             # Check if audio file has sufficient duration
@@ -720,14 +763,21 @@ class VoiceCapture(QObject):
                 self.segment_transcribed.emit("", segment_num)
                 return
 
-            # Transcribe with fp16=False to avoid NaN issues on MPS
-            result = model.transcribe(
-                audio_file,
-
-                task="transcribe",
-                fp16=False,
-                verbose=False  # Suppress whisper output
-            )
+            if use_mlx:
+                import mlx_whisper
+                result = mlx_whisper.transcribe(
+                    audio_file,
+                    path_or_hf_repo=f"mlx-community/whisper-{self.selected_model_name}-mlx",
+                    verbose=False
+                )
+            else:
+                # Transcribe with fp16=False to avoid NaN issues on MPS
+                result = model.transcribe(
+                    audio_file,
+                    task="transcribe",
+                    fp16=False,
+                    verbose=False
+                )
             text = result["text"].strip()
 
             # Save transcription to file
@@ -964,22 +1014,33 @@ class VoiceCapture(QObject):
 
         # Note: notification is shown by the GUI handler (on_tray_retranscribe)
 
+        # Capture MLX state at time of starting retranscription
+        use_mlx_retranscribe = self.use_mlx
+        effective_model_name = f"mlx-{self.selected_model_name}" if use_mlx_retranscribe else self.selected_model_name
+
         # Start transcription in background thread
         def retranscribe_worker():
             try:
-                # Get the model
                 model_name = self.selected_model_name
-                if model_name not in self.loaded_models:
-                    logger.error(f"Model {model_name} not loaded yet")
-                    # Use signal to show error on main thread
-                    QTimer.singleShot(0, lambda: QMessageBox.warning(None, "Fout", f"Model {model_name} is nog niet geladen. Probeer later opnieuw."))
-                    return
 
-                model = self.loaded_models[model_name]
+                if use_mlx_retranscribe:
+                    import mlx_whisper
+                    mlx_repo = f"mlx-community/whisper-{model_name}-mlx"
+
+                    def transcribe_file(path):
+                        return mlx_whisper.transcribe(str(path), path_or_hf_repo=mlx_repo, verbose=False)
+                else:
+                    if model_name not in self.loaded_models:
+                        logger.error(f"Model {model_name} not loaded yet")
+                        QTimer.singleShot(0, lambda: QMessageBox.warning(None, "Fout", f"Model {model_name} is nog niet geladen. Probeer later opnieuw."))
+                        return
+                    loaded_model = self.loaded_models[model_name]
+
+                    def transcribe_file(path):
+                        return loaded_model.transcribe(str(path), task="transcribe", fp16=False, verbose=False)
 
                 if use_segments:
-                    # Transcribe each segment and combine
-                    logger.info(f"Retranscribing {len(segment_files)} segments with {model_name} model...")
+                    logger.info(f"Retranscribing {len(segment_files)} segments with {effective_model_name} model...")
 
                     segment_texts = []
                     for i, segment_file in enumerate(segment_files):
@@ -1000,23 +1061,12 @@ class VoiceCapture(QObject):
                             logger.error(f"Error checking segment {i}: {e}")
                             continue
 
-                        # Transcribe segment
-                        result = model.transcribe(
-                            str(segment_file),
-            
-                            task="transcribe",
-                            fp16=False,
-                            verbose=False
-                        )
-
+                        result = transcribe_file(segment_file)
                         text = result["text"].strip()
                         if text:
                             if len(segment_texts) == 0:
-                                # First segment
                                 segment_texts.append(text)
                             else:
-                                # Remove overlap with previous segment
-                                from transcription_utils import remove_overlap
                                 previous_text = segment_texts[-1]
                                 deduplicated_text = remove_overlap(previous_text, text)
                                 if deduplicated_text.strip():
@@ -1025,17 +1075,8 @@ class VoiceCapture(QObject):
                     transcription_text = " ".join(segment_texts)
                     logger.info(f"Retranscription complete from segments: {len(transcription_text)} chars")
                 else:
-                    # Use main audio file
-                    logger.info(f"Transcribing full audio file {audio_file} with {model_name} model...")
-
-                    result = model.transcribe(
-                        str(audio_file),
-        
-                        task="transcribe",
-                        fp16=False,
-                        verbose=False
-                    )
-
+                    logger.info(f"Transcribing full audio file {audio_file} with {effective_model_name} model...")
+                    result = transcribe_file(audio_file)
                     transcription_text = result["text"].strip()
                     logger.info(f"Retranscription complete: {len(transcription_text)} chars")
 
@@ -1048,17 +1089,17 @@ class VoiceCapture(QObject):
                 self.recording_manager.update_recording(
                     recording_id,
                     transcription=transcription_text,
-                    model=model_name
+                    model=effective_model_name
                 )
 
-                logger.info(f"Updated recording {recording_id} with new transcription and model {model_name}")
+                logger.info(f"Updated recording {recording_id} with new transcription and model {effective_model_name}")
 
                 # Show completion notification on main thread
                 def show_completion():
                     if hasattr(self, 'tray_icon'):
                         self.tray_icon.showMessage(
                             "Hertranscriptie Voltooid",
-                            f"Opname hertranscribeerd met {model_name}: {len(transcription_text)} tekens",
+                            f"Opname hertranscribeerd met {effective_model_name}: {len(transcription_text)} tekens",
                             QSystemTrayIcon.MessageIcon.Information,
                             3000
                         )
