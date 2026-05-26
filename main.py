@@ -249,6 +249,9 @@ class VoiceCapture(QObject):
         self.selected_model_name = "medium"  # Default selected model
         self.use_mlx = False  # Use MLX Whisper (Apple Silicon only), default off
 
+        # Load persisted settings (may override defaults above)
+        self._load_settings()
+
         # Recording state
         self.is_recording = False
         self.current_audio_file = None
@@ -283,11 +286,12 @@ class VoiceCapture(QObject):
         # Initialize tray actions handler (business logic only)
         self.tray_actions = TrayActions(self)
 
-        # Initialize tray icon (GUI)
+        # Initialize tray icon (GUI) — uses self.selected_model_name and self.use_mlx
         self.init_tray_icon()
 
-        # Load default model on startup
-        QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
+        # Load model on startup (skip when MLX is active)
+        if not self.use_mlx:
+            QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
 
         # Start internal HTTP API for MCP server communication
         RecordingAPIHandler.voice_capture = self
@@ -296,6 +300,33 @@ class VoiceCapture(QObject):
         api_thread = threading.Thread(target=api_server.serve_forever, daemon=True)
         api_thread.start()
         logger.info(f"Internal API server started on 127.0.0.1:{INTERNAL_API_PORT}")
+
+    def _settings_path(self) -> Path:
+        return self.base_recordings_dir / "settings.json"
+
+    def _load_settings(self):
+        try:
+            path = self._settings_path()
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                valid_models = {"tiny", "small", "medium", "large"}
+                if data.get("model") in valid_models:
+                    self.selected_model_name = data["model"]
+                if isinstance(data.get("use_mlx"), bool):
+                    self.use_mlx = data["use_mlx"]
+                logger.info(f"Settings loaded: model={self.selected_model_name}, use_mlx={self.use_mlx}")
+        except Exception as e:
+            logger.warning(f"Could not load settings: {e}")
+
+    def _save_settings(self):
+        try:
+            path = self._settings_path()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"model": self.selected_model_name, "use_mlx": self.use_mlx}, f, indent=2)
+            logger.debug(f"Settings saved: model={self.selected_model_name}, use_mlx={self.use_mlx}")
+        except Exception as e:
+            logger.warning(f"Could not save settings: {e}")
 
     def init_tray_icon(self):
         """Initialize system tray icon and menu (GUI)"""
@@ -353,7 +384,7 @@ class VoiceCapture(QObject):
         # MLX Whisper toggle (Apple Silicon)
         self.tray_mlx_action = self.tray_menu.addAction("Gebruik MLX (Apple Silicon)")
         self.tray_mlx_action.setCheckable(True)
-        self.tray_mlx_action.setChecked(False)
+        self.tray_mlx_action.setChecked(self.use_mlx)
         self.tray_mlx_action.triggered.connect(self.on_tray_toggle_mlx)
 
         self.tray_menu.addSeparator()
@@ -492,6 +523,8 @@ class VoiceCapture(QObject):
             if self.use_mlx:
                 message += " (MLX)"
 
+            self._save_settings()
+
             # Show notification
             self.tray_icon.showMessage(
                 "Model Gewijzigd",
@@ -520,6 +553,7 @@ class VoiceCapture(QObject):
                     return
 
             self.use_mlx = enabling
+            self._save_settings()
             status = "ingeschakeld" if self.use_mlx else "uitgeschakeld"
             self.tray_icon.showMessage(
                 "MLX Whisper",
