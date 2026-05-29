@@ -670,6 +670,12 @@ class VoiceCapture(QObject):
 
         def _run():
             try:
+                available = ollama_utils.check_ollama_available()
+                models = ollama_utils.get_ollama_models() if available else []
+                self.ollama_status_checked.emit(available, models)
+                if not available:
+                    logger.warning("Ollama: titelbepaling geannuleerd — Ollama niet beschikbaar")
+                    return
                 logger.info(f"Ollama: verzoek verstuurd naar {ollama_utils.OLLAMA_BASE_URL} ...")
                 title = ollama_utils.generate_title(transcription, model)
                 if title:
@@ -1173,14 +1179,11 @@ class VoiceCapture(QObject):
                 3000
             )
 
-        # Generate title via Ollama if enabled
-        if self.determine_title and self.ollama_available and self.selected_ollama_model:
+        # Generate title via Ollama if enabled (availability is checked fresh inside the thread)
+        if self.determine_title and self.selected_ollama_model:
             self._generate_title_async(self.current_recording_id, final_transcription)
         elif self.determine_title:
-            logger.warning(
-                f"Ollama: titelbepaling actief maar niet uitgevoerd "
-                f"(beschikbaar={self.ollama_available}, model='{self.selected_ollama_model}')"
-            )
+            logger.warning("Ollama: titelbepaling actief maar geen model geselecteerd")
 
         # Reset state
         self.is_recording = False
