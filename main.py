@@ -38,6 +38,7 @@ except ImportError:
         return "unknown"
 from transcription_utils import remove_overlap, is_empty_segment
 from tray_actions import TrayActions
+import ollama_utils
 
 # Setup logging
 logger = get_logger(__name__)
@@ -233,6 +234,8 @@ class VoiceCapture(QObject):
     transcription_complete = pyqtSignal(dict)
     model_loaded = pyqtSignal(str, object)  # (model_name, model_object)
     segment_transcribed = pyqtSignal(str, int)  # Signal for incremental transcription updates (text, segment_num)
+    ollama_status_checked = pyqtSignal(bool, object)  # (available, models_list)
+    ollama_title_generated = pyqtSignal(str, str)      # (recording_id, title)
 
     def __init__(self):
         super().__init__()
@@ -249,6 +252,12 @@ class VoiceCapture(QObject):
         self.selected_model_name = "medium"  # Default selected model
         self.use_mlx = False  # Use MLX Whisper (Apple Silicon only), default off
 
+        # Ollama title generation
+        self.ollama_available = False
+        self.ollama_models = []
+        self.selected_ollama_model = ""
+        self.determine_title = False  # Default: off
+
         # Load persisted settings (may override defaults above)
         self._load_settings()
 
@@ -261,6 +270,8 @@ class VoiceCapture(QObject):
         self.transcription_complete.connect(self.on_transcription_complete)
         self.model_loaded.connect(self.on_model_loaded)
         self.segment_transcribed.connect(self.on_segment_transcribed)
+        self.ollama_status_checked.connect(self.on_ollama_status_checked)
+        self.ollama_title_generated.connect(self._apply_generated_title)
 
         # Track pending transcription
         self.pending_transcription = False
@@ -293,6 +304,9 @@ class VoiceCapture(QObject):
         if not self.use_mlx:
             QTimer.singleShot(500, lambda: self.load_model_async(self.selected_model_name))
 
+        # Check Ollama availability asynchronously
+        QTimer.singleShot(300, self.check_ollama_async)
+
         # Start internal HTTP API for MCP server communication
         RecordingAPIHandler.voice_capture = self
         RecordingAPIHandler.bridge = CommandBridge()
@@ -315,7 +329,11 @@ class VoiceCapture(QObject):
                     self.selected_model_name = data["model"]
                 if isinstance(data.get("use_mlx"), bool):
                     self.use_mlx = data["use_mlx"]
-                logger.info(f"Settings loaded: model={self.selected_model_name}, use_mlx={self.use_mlx}")
+                if isinstance(data.get("determine_title"), bool):
+                    self.determine_title = data["determine_title"]
+                if isinstance(data.get("ollama_model"), str):
+                    self.selected_ollama_model = data["ollama_model"]
+                logger.info(f"Settings loaded: model={self.selected_model_name}, use_mlx={self.use_mlx}, determine_title={self.determine_title}")
         except Exception as e:
             logger.warning(f"Could not load settings: {e}")
 
@@ -323,8 +341,13 @@ class VoiceCapture(QObject):
         try:
             path = self._settings_path()
             with open(path, "w", encoding="utf-8") as f:
-                json.dump({"model": self.selected_model_name, "use_mlx": self.use_mlx}, f, indent=2)
-            logger.debug(f"Settings saved: model={self.selected_model_name}, use_mlx={self.use_mlx}")
+                json.dump({
+                    "model": self.selected_model_name,
+                    "use_mlx": self.use_mlx,
+                    "determine_title": self.determine_title,
+                    "ollama_model": self.selected_ollama_model,
+                }, f, indent=2)
+            logger.debug(f"Settings saved: model={self.selected_model_name}, use_mlx={self.use_mlx}, determine_title={self.determine_title}")
         except Exception as e:
             logger.warning(f"Could not save settings: {e}")
 
@@ -386,6 +409,20 @@ class VoiceCapture(QObject):
         self.tray_mlx_action.setCheckable(True)
         self.tray_mlx_action.setChecked(self.use_mlx)
         self.tray_mlx_action.triggered.connect(self.on_tray_toggle_mlx)
+
+        self.tray_menu.addSeparator()
+
+        # Ollama title determination
+        self.tray_determine_title_action = self.tray_menu.addAction("Bepaal titel na opname")
+        self.tray_determine_title_action.setCheckable(True)
+        self.tray_determine_title_action.setChecked(self.determine_title)
+        self.tray_determine_title_action.setEnabled(self.ollama_available)
+        self.tray_determine_title_action.triggered.connect(self.on_tray_toggle_determine_title)
+
+        self.tray_ollama_model_menu = QMenu("Ollama Model", self.tray_menu)
+        self.tray_ollama_model_menu.setEnabled(self.ollama_available)
+        self._rebuild_ollama_model_menu()
+        self.tray_menu.addMenu(self.tray_ollama_model_menu)
 
         self.tray_menu.addSeparator()
 
@@ -564,6 +601,100 @@ class VoiceCapture(QObject):
         except Exception as e:
             QMessageBox.warning(None, "Fout", f"Kon MLX niet instellen: {str(e)}")
 
+    def on_tray_toggle_determine_title(self):
+        """Handle 'Bepaal titel na opname' toggle - GUI handler"""
+        self.determine_title = self.tray_determine_title_action.isChecked()
+        self._save_settings()
+        status = "ingeschakeld" if self.determine_title else "uitgeschakeld"
+        self.tray_icon.showMessage(
+            "Titelbepaling",
+            f"Automatische titelbepaling {status}",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000,
+        )
+
+    def on_tray_set_ollama_model(self, model_name: str):
+        """Handle Ollama model selection - GUI handler"""
+        self.selected_ollama_model = model_name
+        self._save_settings()
+        logger.info(f"Ollama model set to: {model_name}")
+
+    def _rebuild_ollama_model_menu(self):
+        """Rebuild the Ollama model radio-button submenu."""
+        self.tray_ollama_model_menu.clear()
+        if not self.ollama_models:
+            placeholder = self.tray_ollama_model_menu.addAction("(geen modellen beschikbaar)")
+            placeholder.setEnabled(False)
+            return
+
+        group = QActionGroup(self.tray_ollama_model_menu)
+        group.setExclusive(True)
+        # Default to first model if stored model is no longer in the list
+        if self.selected_ollama_model not in self.ollama_models:
+            self.selected_ollama_model = self.ollama_models[0]
+            self._save_settings()
+
+        for model in self.ollama_models:
+            action = self.tray_ollama_model_menu.addAction(model)
+            action.setCheckable(True)
+            action.setChecked(model == self.selected_ollama_model)
+            action.triggered.connect(lambda checked, m=model: self.on_tray_set_ollama_model(m))
+            group.addAction(action)
+
+    def check_ollama_async(self):
+        """Check Ollama availability in a background thread and emit signal when done."""
+        logger.info("Ollama: beschikbaarheid controleren ...")
+
+        def _check():
+            available = ollama_utils.check_ollama_available()
+            models = ollama_utils.get_ollama_models() if available else []
+            self.ollama_status_checked.emit(available, models)
+
+        t = threading.Thread(target=_check, daemon=True, name="ollama-check")
+        t.start()
+
+    def on_ollama_status_checked(self, available: bool, models: object):
+        """Update Ollama-related menu items after availability check (main thread)."""
+        self.ollama_available = available
+        self.ollama_models = list(models) if models else []
+        logger.info(f"Ollama available={available}, models={self.ollama_models}")
+
+        self.tray_determine_title_action.setEnabled(available)
+        self.tray_ollama_model_menu.setEnabled(available)
+        self._rebuild_ollama_model_menu()
+
+    def _generate_title_async(self, recording_id: str, transcription: str):
+        """Generate a recording title via Ollama in a background thread."""
+        model = self.selected_ollama_model
+        logger.info(f"Ollama: titel genereren voor opname {recording_id} met model '{model}' ({len(transcription)} tekens)")
+
+        def _run():
+            try:
+                logger.info(f"Ollama: verzoek verstuurd naar {ollama_utils.OLLAMA_BASE_URL} ...")
+                title = ollama_utils.generate_title(transcription, model)
+                if title:
+                    logger.info(f"Ollama: titel ontvangen: '{title}'")
+                    self.ollama_title_generated.emit(recording_id, title)
+                else:
+                    logger.warning("Ollama: lege titel ontvangen, opname naam ongewijzigd")
+            except Exception as e:
+                logger.warning(f"Ollama: titelbepaling mislukt: {e}")
+
+        t = threading.Thread(target=_run, daemon=True, name="ollama-title")
+        t.start()
+
+    def _apply_generated_title(self, recording_id: str, title: str):
+        """Save the Ollama-generated title to the recording JSON (main thread)."""
+        self.recording_manager.update_recording(recording_id, name=title)
+        logger.info(f"Ollama: titel opgeslagen voor {recording_id}: '{title}'")
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.showMessage(
+                "Titel Bepaald",
+                title,
+                QSystemTrayIcon.MessageIcon.Information,
+                4000,
+            )
+
     def on_tray_show_version(self):
         """Handle show version from tray - GUI handler"""
         version = get_version_string()
@@ -628,6 +759,60 @@ class VoiceCapture(QObject):
             list_widget.addItem(item)
 
         layout.addWidget(list_widget)
+
+        # Right-click context menu on list items
+        list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        def on_context_menu(pos):
+            item = list_widget.itemAt(pos)
+            if not item:
+                return
+
+            recording_id = item.data(Qt.ItemDataRole.UserRole)
+            context_menu = QMenu(list_widget)
+            bepaal_titel_action = context_menu.addAction("Bepaal titel")
+            bepaal_titel_action.setEnabled(self.ollama_available and bool(self.selected_ollama_model))
+
+            action = context_menu.exec(list_widget.viewport().mapToGlobal(pos))
+            if action == bepaal_titel_action:
+                recording = self.recording_manager.get_recording(recording_id)
+                if not recording:
+                    QMessageBox.warning(dialog, "Fout", "Opname niet gevonden.")
+                    return
+                transcription = recording.get('transcription', '')
+                if not transcription:
+                    QMessageBox.warning(dialog, "Geen transcriptie", "Deze opname heeft geen transcriptie om een titel van te bepalen.")
+                    return
+                self._generate_title_async(recording_id, transcription)
+                self.tray_icon.showMessage(
+                    "Titel Bepalen",
+                    "Bezig met bepalen van de titel...",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2000,
+                )
+
+        list_widget.customContextMenuRequested.connect(on_context_menu)
+
+        # Update list item text when a title is generated while dialog is open
+        def update_list_item_title(gen_recording_id, title):
+            for i in range(list_widget.count()):
+                it = list_widget.item(i)
+                if it.data(Qt.ItemDataRole.UserRole) == gen_recording_id:
+                    rec = self.recording_manager.get_recording(gen_recording_id)
+                    if rec:
+                        recording_date = rec.get('date', '')
+                        duration = rec.get('duration', '')
+                        current_model = rec.get('model', '')
+                        new_text = f"{title} - {recording_date}"
+                        if duration:
+                            new_text += f" ({duration})"
+                        if current_model:
+                            new_text += f" [model: {current_model}]"
+                        it.setText(new_text)
+                    break
+
+        self.ollama_title_generated.connect(update_list_item_title)
+        dialog.finished.connect(lambda: self.ollama_title_generated.disconnect(update_list_item_title))
 
         # Add buttons
         button_layout = QHBoxLayout()
@@ -986,6 +1171,15 @@ class VoiceCapture(QObject):
                 f"Opname getranscribeerd: {len(final_transcription)} tekens",
                 QSystemTrayIcon.MessageIcon.Information,
                 3000
+            )
+
+        # Generate title via Ollama if enabled
+        if self.determine_title and self.ollama_available and self.selected_ollama_model:
+            self._generate_title_async(self.current_recording_id, final_transcription)
+        elif self.determine_title:
+            logger.warning(
+                f"Ollama: titelbepaling actief maar niet uitgevoerd "
+                f"(beschikbaar={self.ollama_available}, model='{self.selected_ollama_model}')"
             )
 
         # Reset state
