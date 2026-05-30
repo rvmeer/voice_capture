@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: Smoke (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-optional.txt
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev ffmpeg
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax smoke check
+        run: |
+          python -m py_compile main.py
+          python -m py_compile audio_recorder.py
+          python -m py_compile recording_manager.py
+          python -m py_compile recordings.py
+          python -m py_compile openapi_server.py
+          python -m py_compile mcp_server.py
+
+      - name: Import smoke check
+        run: |
+          python -c "import recording_manager, ollama_utils, transcription_utils, mcp_server, openapi_server; print('import smoke ok')"
+
+      - name: Architecture test script
+        run: |
+          python test_architecture.py
