@@ -1,27 +1,42 @@
-# Audio Transcriptie Applicatie met Whisper
+# Voice Capture
 
-Een professionele tray-only desktop applicatie voor het opnemen en transcriberen van audio met OpenAI's Whisper model. Draait volledig in de system tray met API toegang via FastAPI.
+Neem audio op met één klik vanuit je system tray en krijg automatisch transcripties met Whisper.
+
+Deze app is gemaakt voor eindgebruikers die snel willen opnemen + teruglezen, zonder complexe UI. Starten, praten, stoppen, klaar.
 
 **Ondersteunde platforms**: macOS, Windows, Linux
 
-## Features
+## Waarom deze app?
 
-✅ **Cross-Platform** - Werkt op macOS, Windows en Linux
-✅ **System Tray Interface** - Volledige bediening via system tray icoon
-✅ **Click-to-Record** - Eén klik om opname te starten/stoppen
-✅ **Multiple Whisper Models** - Keuze uit tiny/small/medium/large modellen
-✅ **MLX Whisper Support** - Supersnelle transcriptie op Apple Silicon (M1/M2/M3/M4)
-✅ **Speaker Diarization** - Identificeert automatisch wie spreekt in gesprekken
-✅ **Live Transcriptie** - Incrementele transcriptie tijdens opname (segmented)
-✅ **Audio Input Selection** - Kies je microfoon/audio input via tray menu
-✅ **Nederlandse Taal** - Geoptimaliseerd voor Nederlands
-✅ **Auto-save** - Automatisch opslaan zonder dialogen
-✅ **Empty Recording Detection** - Automatisch verwijderen van lege opnames
-✅ **Model Caching** - Gekozen modellen blijven in geheugen voor snelheid
-✅ **Configurable Segments** - Instelbare segment lengte en overlap
-✅ **CLI Tools** - Beheer opnames via command line (retranscribe, diarization)
-✅ **FastAPI Server** - Volledige API toegang tot opnames
-✅ **MCP Server** - Claude Desktop integratie
+- **Tray-only**: geen groot venster, altijd snel beschikbaar
+- **Snel opnemen**: klik op het tray-icoon om direct te starten/stoppen
+- **Automatische transcriptie**: tekst wordt direct opgeslagen bij je opname
+- **Werkt lokaal**: je opnames staan in je eigen `recordings/` map
+
+## Belangrijkste features (voor eindgebruikers)
+
+1. **Eén-klik opname vanuit tray** (start/stop)
+2. **Live/incrementele transcriptie** tijdens opnemen
+3. **Keuze uit Whisper modellen** (tiny/small/medium/large)
+4. **Supersnel op Apple Silicon** via MLX Whisper (M1/M2/M3/M4)
+5. **Speaker diarization** (wie zegt wat) voor gesprekken
+6. **Microfoon/input selectie** via tray menu
+7. **Automatisch opslaan** van audio + transcriptie per opname
+8. **Lege opnames automatisch opgeschoond**
+9. **API toegang via FastAPI** (`/docs` beschikbaar)
+10. **MCP integratie** voor Claude/Desktop tooling
+
+## Snelle start
+
+```bash
+python main.py
+```
+
+Na starten:
+- Tray-icoon verschijnt
+- Klik = opname starten/stoppen
+- Transcriptie wordt automatisch opgebouwd en opgeslagen
+- API draait op <http://localhost:8000/docs>
 
 ## Installatie
 
