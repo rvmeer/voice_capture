@@ -24,3 +24,6 @@ icon.png
 create_icon.py
 create_windows_icon.py
 env2/
+
+# Local temporary files (screenshots, scratch)
+tmp/
