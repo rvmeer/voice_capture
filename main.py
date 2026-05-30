@@ -379,6 +379,9 @@ class VoiceCapture(QObject):
         self.tray_toggle_action.triggered.connect(self.on_tray_toggle_recording)
         # Show shortcut in menu as grey hint on the right (macOS style)
         self.tray_toggle_action.setShortcut(QKeySequence("Ctrl+Alt+Meta+R"))
+        self.tray_toggle_action.setShortcutVisibleInContextMenu(True)
+        # Fallback: keep shortcut visible in title for tray implementations that hide shortcut hints
+        self.tray_toggle_action.setText("Start Opname\t⌃⌥⌘R")
 
         self.tray_menu.addSeparator()
 
