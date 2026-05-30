@@ -12,6 +12,7 @@ import threading
 import shutil
 import platform
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -299,6 +300,10 @@ class VoiceCapture(QObject):
         self.global_hotkey_listener = None
         self.hotkey_combo_active = False
 
+        # Ollama status refresh throttling/state
+        self.ollama_check_in_progress = False
+        self.last_ollama_check_started_at = 0.0
+
         # Settings
         self.segment_duration = 10  # seconds
         self.overlap_duration = 5  # seconds
@@ -469,6 +474,8 @@ class VoiceCapture(QObject):
 
         # Connect tray icon activation (click)
         self.tray_icon.activated.connect(self.on_tray_icon_activated)
+        # Refresh Ollama availability when menu opens (async, non-blocking)
+        self.tray_menu.aboutToShow.connect(self.on_tray_menu_about_to_show)
 
         # Show tray icon
         self.tray_icon.show()
@@ -533,8 +540,12 @@ class VoiceCapture(QObject):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:  # Left click
             self.on_tray_toggle_recording()
         elif reason == QSystemTrayIcon.ActivationReason.Context:  # Right click / Control+click on macOS
-            # Show context menu at cursor position
+            # Show context menu at cursor position (menu show triggers async Ollama refresh)
             self.tray_menu.popup(QCursor.pos())
+
+    def on_tray_menu_about_to_show(self):
+        """Refresh Ollama availability when tray menu opens (asynchronous)."""
+        self.check_ollama_async(force=False)
 
     def on_tray_toggle_recording(self):
         """Handle toggle recording from tray - GUI handler"""
@@ -709,8 +720,18 @@ class VoiceCapture(QObject):
             action.triggered.connect(lambda checked, m=model: self.on_tray_set_ollama_model(m))
             group.addAction(action)
 
-    def check_ollama_async(self):
+    def check_ollama_async(self, force: bool = False):
         """Check Ollama availability in a background thread and emit signal when done."""
+        now = time.monotonic()
+        # Avoid stacking checks when the menu opens repeatedly.
+        if self.ollama_check_in_progress:
+            return
+        # Throttle quick repeated opens; force=True bypasses this.
+        if not force and (now - self.last_ollama_check_started_at) < 2.0:
+            return
+
+        self.ollama_check_in_progress = True
+        self.last_ollama_check_started_at = now
         logger.info("Ollama: beschikbaarheid controleren ...")
 
         def _check():
@@ -723,6 +744,7 @@ class VoiceCapture(QObject):
 
     def on_ollama_status_checked(self, available: bool, models: object):
         """Update Ollama-related menu items after availability check (main thread)."""
+        self.ollama_check_in_progress = False
         self.ollama_available = available
         self.ollama_models = list(models) if models else []
         logger.info(f"Ollama available={available}, models={self.ollama_models}")
