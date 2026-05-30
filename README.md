@@ -36,7 +36,7 @@ Na starten:
 - Tray-icoon verschijnt
 - Klik = opname starten/stoppen
 - Sneltoets op macOS: **Control+Option+Command+R** (toggle start/stop)
-- In het tray menu zie je ook: **Sneltoets: ⌃⌥⌘R (start/stop)**
+- In het tray menu staat de sneltoets grijs rechts naast **Start Opname**
 - Transcriptie wordt automatisch opgebouwd en opgeslagen
 - API draait op <http://localhost:8000/docs>
 

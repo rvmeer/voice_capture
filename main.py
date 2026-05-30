@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QListWidget, QPushButton, QLabel, QHBoxLayout, QListWidgetItem
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QIcon, QPainter, QPixmap, QPen, QColor, QActionGroup, QCursor
+from PyQt6.QtGui import QIcon, QPainter, QPixmap, QPen, QColor, QActionGroup, QCursor, QKeySequence
 
 # Import custom modules
 from audio_recorder import AudioRecorder
@@ -377,10 +377,8 @@ class VoiceCapture(QObject):
         # Add toggle recording action
         self.tray_toggle_action = self.tray_menu.addAction("Start Opname")
         self.tray_toggle_action.triggered.connect(self.on_tray_toggle_recording)
-
-        # Show global hotkey hint in menu (informational)
-        self.tray_hotkey_info_action = self.tray_menu.addAction("Sneltoets: ⌃⌥⌘R (start/stop)")
-        self.tray_hotkey_info_action.setEnabled(False)
+        # Show shortcut in menu as grey hint on the right (macOS style)
+        self.tray_toggle_action.setShortcut(QKeySequence("Ctrl+Alt+Meta+R"))
 
         self.tray_menu.addSeparator()
 
