@@ -378,6 +378,10 @@ class VoiceCapture(QObject):
         self.tray_toggle_action = self.tray_menu.addAction("Start Opname")
         self.tray_toggle_action.triggered.connect(self.on_tray_toggle_recording)
 
+        # Show global hotkey hint in menu (informational)
+        self.tray_hotkey_info_action = self.tray_menu.addAction("Sneltoets: ⌃⌥⌘R (start/stop)")
+        self.tray_hotkey_info_action.setEnabled(False)
+
         self.tray_menu.addSeparator()
 
         # Add transcription model selection submenu
