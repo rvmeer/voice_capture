@@ -35,6 +35,7 @@ python main.py
 Na starten:
 - Tray-icoon verschijnt
 - Klik = opname starten/stoppen
+- Sneltoets op macOS: **Control+Option+Command+R** (toggle start/stop)
 - Transcriptie wordt automatisch opgebouwd en opgeslagen
 - API draait op <http://localhost:8000/docs>
 

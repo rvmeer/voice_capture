@@ -40,6 +40,11 @@ from transcription_utils import remove_overlap, is_empty_segment
 from tray_actions import TrayActions
 import ollama_utils
 
+try:
+    from pynput import keyboard as pynput_keyboard
+except ImportError:
+    pynput_keyboard = None
+
 # Setup logging
 logger = get_logger(__name__)
 
@@ -236,6 +241,7 @@ class VoiceCapture(QObject):
     segment_transcribed = pyqtSignal(str, int)  # Signal for incremental transcription updates (text, segment_num)
     ollama_status_checked = pyqtSignal(bool, object)  # (available, models_list)
     ollama_title_generated = pyqtSignal(str, str)      # (recording_id, title)
+    hotkey_toggle_requested = pyqtSignal()             # Global hotkey -> toggle recording
 
     def __init__(self):
         super().__init__()
@@ -272,6 +278,7 @@ class VoiceCapture(QObject):
         self.segment_transcribed.connect(self.on_segment_transcribed)
         self.ollama_status_checked.connect(self.on_ollama_status_checked)
         self.ollama_title_generated.connect(self._apply_generated_title)
+        self.hotkey_toggle_requested.connect(self._on_hotkey_toggle_requested)
 
         # Track pending transcription
         self.pending_transcription = False
@@ -288,6 +295,10 @@ class VoiceCapture(QObject):
         self.consecutive_empty_segments = 0
         self.empty_segment_warning_shown = False
 
+        # Global hotkey listener (macOS): Ctrl+Option+Command+R
+        self.global_hotkey_listener = None
+        self.hotkey_combo_active = False
+
         # Settings
         self.segment_duration = 10  # seconds
         self.overlap_duration = 5  # seconds
@@ -299,6 +310,9 @@ class VoiceCapture(QObject):
 
         # Initialize tray icon (GUI) — uses self.selected_model_name and self.use_mlx
         self.init_tray_icon()
+
+        # Setup global hotkey (macOS only)
+        self.setup_global_hotkey()
 
         # Load model on startup (skip when MLX is active)
         if not self.use_mlx:
@@ -457,6 +471,55 @@ class VoiceCapture(QObject):
 
         # Refresh input devices menu
         self.refresh_tray_input_devices()
+
+    def setup_global_hotkey(self):
+        """Setup global macOS hotkey: Ctrl+Option+Command+R (toggle recording)."""
+        if platform.system() != "Darwin":
+            logger.info("Global hotkey is momenteel alleen actief op macOS")
+            return
+
+        if pynput_keyboard is None:
+            logger.warning(
+                "Global hotkey niet beschikbaar: module 'pynput' ontbreekt. "
+                "Installeer via: pip install pynput"
+            )
+            return
+
+        combo = {
+            pynput_keyboard.Key.ctrl,
+            pynput_keyboard.Key.alt,
+            pynput_keyboard.Key.cmd,
+            pynput_keyboard.KeyCode.from_char('r'),
+        }
+        current_keys = set()
+
+        def on_press(key):
+            current_keys.add(key)
+            if combo.issubset(current_keys):
+                if not self.hotkey_combo_active:
+                    self.hotkey_combo_active = True
+                    self.hotkey_toggle_requested.emit()
+            else:
+                self.hotkey_combo_active = False
+
+        def on_release(key):
+            if key in current_keys:
+                current_keys.remove(key)
+            if not combo.issubset(current_keys):
+                self.hotkey_combo_active = False
+
+        try:
+            self.global_hotkey_listener = pynput_keyboard.Listener(on_press=on_press, on_release=on_release)
+            self.global_hotkey_listener.daemon = True
+            self.global_hotkey_listener.start()
+            logger.info("Global hotkey actief: Ctrl+Option+Command+R")
+        except Exception as e:
+            logger.warning(f"Kon global hotkey niet starten: {e}")
+            self.global_hotkey_listener = None
+
+    def _on_hotkey_toggle_requested(self):
+        """Handle global hotkey event on Qt main thread."""
+        self.on_tray_toggle_recording()
 
     # Tray GUI event handlers (delegate to tray_actions for business logic)
 
@@ -866,6 +929,14 @@ class VoiceCapture(QObject):
 
     def on_tray_quit(self):
         """Handle quit from tray - GUI handler"""
+        # Stop global hotkey listener
+        if self.global_hotkey_listener is not None:
+            try:
+                self.global_hotkey_listener.stop()
+            except Exception as e:
+                logger.debug(f"Failed stopping hotkey listener: {e}")
+            self.global_hotkey_listener = None
+
         # Call business logic
         self.tray_actions.quit_application()
 
