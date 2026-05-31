@@ -40,6 +40,7 @@ except ImportError:
 from transcription_utils import remove_overlap, is_empty_segment
 from tray_actions import TrayActions
 import ollama_utils
+from transcribe_server import start_transcribe_server_in_background
 
 try:
     from pynput import keyboard as pynput_keyboard
@@ -333,6 +334,9 @@ class VoiceCapture(QObject):
         api_thread = threading.Thread(target=api_server.serve_forever, daemon=True)
         api_thread.start()
         logger.info(f"Internal API server started on 127.0.0.1:{INTERNAL_API_PORT}")
+
+        # Start async transcribe API server on port 5152
+        start_transcribe_server_in_background(host="127.0.0.1", port=5152)
 
     def _settings_path(self) -> Path:
         return self.base_recordings_dir / "settings.json"
