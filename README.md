@@ -246,6 +246,34 @@ Zie [OPENAPI_README.md](OPENAPI_README.md) voor meer details.
 ### MCP Server:
 Voor gebruik met Claude Desktop, zie [MCP_README.md](MCP_README.md).
 
+## Transcribe API (poort 5152)
+
+### Auth
+Gebruik één van:
+- `X-API-Key: <key>`
+- `Authorization: Bearer <key>`
+
+### Endpoints
+1. `POST /transcriptions` (multipart/form-data)
+   - verplicht: `file`
+   - optioneel: `model` (default: `large`)
+   - response: `transcription_job_id`
+2. `GET /transcriptions/{job_id}`
+   - status: `queued | running | completed | failed`
+3. `GET /transcriptions/{job_id}/transcript`
+   - haalt transcript op zodra job klaar is
+
+### Gedrag
+- Geüploade audio wordt na verwerking verwijderd
+- Na succesvolle transcript-download wordt de job direct verwijderd
+
+### Quickstart
+```bash
+BASE_URL="http://<HOST>:5152"
+API_KEY="<jouw-key>"
+./transcribe.sh ./audio.m4a
+```
+
 **Snelle configuratie via uvx** (aanbevolen):
 ```json
 {

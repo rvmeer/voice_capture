@@ -335,8 +335,8 @@ class VoiceCapture(QObject):
         api_thread.start()
         logger.info(f"Internal API server started on 127.0.0.1:{INTERNAL_API_PORT}")
 
-        # Start async transcribe API server on port 5152
-        start_transcribe_server_in_background(host="127.0.0.1", port=5152)
+        # Start async transcribe API server on port 5152 (extern bereikbaar)
+        start_transcribe_server_in_background(host="0.0.0.0", port=5152)
 
     def _settings_path(self) -> Path:
         return self.base_recordings_dir / "settings.json"
