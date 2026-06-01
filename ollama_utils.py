@@ -32,7 +32,7 @@ def get_ollama_models(timeout: int = 3) -> list:
         return []
 
 
-def generate_title(transcription: str, model: str, timeout: int = 60) -> str:
+def generate_title(transcription: str, model: str, timeout: int = 300) -> str:
     """Generate a short recording title by sending the transcription to Ollama."""
     prompt = (
         "Je krijgt een transcriptie van een gesproken opname. "
