@@ -110,8 +110,12 @@ Na installatie: herstart deze applicatie."""
     return False
 
 
-def create_tray_icon(recording=False):
-    """Create a tray icon - white open circle when idle, red solid circle when recording"""
+def create_tray_icon(recording=False, level=0.0, pulse_phase=0):
+    """Create a tray icon.
+
+    Idle: white open circle.
+    Recording: white ring + animated red center based on input level.
+    """
     # Create a 22x22 pixmap (standard size for macOS menu bar icons)
     pixmap = QPixmap(22, 22)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -120,20 +124,29 @@ def create_tray_icon(recording=False):
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     if recording:
-        # White open circle outline
-        pen = QPen(QColor(255, 255, 255))  # White
+        # Outer white ring
+        pen = QPen(QColor(255, 255, 255))
         pen.setWidth(2)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(2, 2, 18, 18)
 
-        # Red solid circle inside
-        painter.setBrush(QColor(244, 67, 54))  # Red color
+        # Animated red center reacting to live input level
+        clamped = max(0.0, min(1.0, float(level)))
+        pulse = 0.6 if (pulse_phase % 2 == 0) else 1.0
+
+        # Radius between 4 and 7 px depending on level + subtle pulse
+        radius = 4 + int(round(3 * clamped * pulse))
+        alpha = 180 + int(75 * clamped)
+
+        painter.setBrush(QColor(244, 67, 54, alpha))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(6, 6, 10, 10)
+        diameter = radius * 2
+        top_left = 11 - radius
+        painter.drawEllipse(top_left, top_left, diameter, diameter)
     else:
         # White open circle outline when idle
-        pen = QPen(QColor(255, 255, 255))  # White
+        pen = QPen(QColor(255, 255, 255))
         pen.setWidth(2)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -309,7 +322,11 @@ class VoiceCapture(QObject):
         self.segment_duration = 10  # seconds
         self.overlap_duration = 5  # seconds
 
-
+        # Tray animation state (recording input meter)
+        self.icon_pulse_phase = 0
+        self.icon_animation_timer = QTimer(self)
+        self.icon_animation_timer.setInterval(140)
+        self.icon_animation_timer.timeout.connect(self.update_recording_tray_icon)
 
         # Initialize tray actions handler (business logic only)
         self.tray_actions = TrayActions(self)
@@ -557,7 +574,8 @@ class VoiceCapture(QObject):
             # Start recording
             self.tray_actions.start_recording()
             # Update UI
-            self.tray_icon.setIcon(create_tray_icon(recording=True))
+            self.update_recording_tray_icon()
+            self.icon_animation_timer.start()
             self.tray_icon.setToolTip("Opname bezig... (klik om te stoppen)")
             self.tray_toggle_action.setText("Stop Opname")
         else:
@@ -565,15 +583,25 @@ class VoiceCapture(QObject):
             try:
                 self.tray_actions.stop_recording()
                 # Update UI
+                self.icon_animation_timer.stop()
                 self.tray_icon.setIcon(create_tray_icon(recording=False))
                 self.tray_icon.setToolTip("Voice Capture (klik om op te nemen)")
                 self.tray_toggle_action.setText("Start Opname")
             except Exception as e:
                 # Handle error in UI
+                self.icon_animation_timer.stop()
                 self.tray_icon.setIcon(create_tray_icon(recording=False))
                 self.tray_icon.setToolTip("Voice Capture (klik om op te nemen)")
                 self.tray_toggle_action.setText("Start Opname")
                 QMessageBox.critical(None, "Fout", f"Fout bij opslaan: {str(e)}")
+
+    def update_recording_tray_icon(self):
+        """Animate tray icon while recording based on current input level."""
+        if not self.is_recording:
+            return
+        level = getattr(self.recorder, "input_level", 0.0)
+        self.tray_icon.setIcon(create_tray_icon(recording=True, level=level, pulse_phase=self.icon_pulse_phase))
+        self.icon_pulse_phase = (self.icon_pulse_phase + 1) % 1000000
 
     def refresh_tray_input_devices(self):
         """Refresh the audio input device list in tray menu - GUI handler"""

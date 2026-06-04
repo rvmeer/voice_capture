@@ -5,6 +5,7 @@ Handles audio recording functionality with segmented recording support
 
 import wave
 import threading
+import audioop
 from datetime import datetime
 from pathlib import Path
 import pyaudio
@@ -27,6 +28,9 @@ class AudioRecorder:
         self.is_recording = False
         self.audio = pyaudio.PyAudio()
         self.stream = None
+
+        # Input level meter (0.0 - 1.0), read by tray animation
+        self.input_level = 0.0
 
         # For 10-second segments with 5-second overlap
         self.segment_duration = 10  # seconds
@@ -76,6 +80,7 @@ class AudioRecorder:
         self.segment_callback = segment_callback
         self.segment_counter = 0
         self.recording_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.input_level = 0.0
 
         # Open stream with selected input device
         stream_params = {
@@ -102,6 +107,15 @@ class AudioRecorder:
                     data = self.stream.read(self.CHUNK, exception_on_overflow=False)
                     self.frames.append(data)
                     self.all_frames.append(data)  # Also store in complete recording
+
+                    # Update level meter (RMS on int16 audio, normalized to 0..1)
+                    # Use gentle compression so normal speech remains visible.
+                    try:
+                        rms = audioop.rms(data, 2)  # 16-bit samples => width=2
+                        normalized = min(1.0, rms / 9000.0)
+                        self.input_level = self.input_level * 0.65 + normalized * 0.35
+                    except Exception:
+                        pass
 
                     # Check if we have 30 seconds of audio
                     if len(self.frames) >= frames_per_segment:
@@ -165,6 +179,7 @@ class AudioRecorder:
 
         # Use the recording timestamp from start_recording
         timestamp = self.recording_timestamp if self.recording_timestamp else datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.input_level = 0.0
 
         # Create recording directory structure
         rec_dir = self.base_recordings_dir / f"recording_{timestamp}"

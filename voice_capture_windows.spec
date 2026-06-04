@@ -34,6 +34,8 @@ a = Analysis(
         ('openapi_server.py', '.'),
         ('logging_config.py', '.'),
         ('mcp_server.py', '.'),
+        # Include version file (generated during build)
+        ('version.py', '.'),
         # Include Whisper assets (mel_filters, tokenizers, etc.)
         # Note: Path will be different on Windows, adjust as needed
         # Example for virtual environment:
