@@ -872,9 +872,18 @@ class VoiceCapture(QObject):
             context_menu = QMenu(list_widget)
             bepaal_titel_action = context_menu.addAction("Bepaal titel")
             bepaal_titel_action.setEnabled(self.ollama_available and bool(self.selected_ollama_model))
+            kopieer_opname_id_action = context_menu.addAction("Kopieer opname id")
 
             action = context_menu.exec(list_widget.viewport().mapToGlobal(pos))
-            if action == bepaal_titel_action:
+            if action == kopieer_opname_id_action:
+                QApplication.clipboard().setText(str(recording_id))
+                self.tray_icon.showMessage(
+                    "Opname id gekopieerd",
+                    str(recording_id),
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2000,
+                )
+            elif action == bepaal_titel_action:
                 recording = self.recording_manager.get_recording(recording_id)
                 if not recording:
                     QMessageBox.warning(dialog, "Fout", "Opname niet gevonden.")
