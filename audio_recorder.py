@@ -5,10 +5,10 @@ Handles audio recording functionality with segmented recording support
 
 import wave
 import threading
-import audioop
 from datetime import datetime
 from pathlib import Path
 import pyaudio
+import numpy as np
 import os
 from logging_config import get_logger
 
@@ -109,11 +109,13 @@ class AudioRecorder:
                     self.all_frames.append(data)  # Also store in complete recording
 
                     # Update level meter (RMS on int16 audio, normalized to 0..1)
-                    # Use gentle compression so normal speech remains visible.
+                    # audioop bestaat niet meer in Python 3.13, dus gebruik numpy.
                     try:
-                        rms = audioop.rms(data, 2)  # 16-bit samples => width=2
-                        normalized = min(1.0, rms / 9000.0)
-                        self.input_level = self.input_level * 0.65 + normalized * 0.35
+                        samples = np.frombuffer(data, dtype=np.int16)
+                        if samples.size > 0:
+                            rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+                            normalized = min(1.0, rms / 9000.0)
+                            self.input_level = self.input_level * 0.65 + normalized * 0.35
                     except Exception:
                         pass
 
