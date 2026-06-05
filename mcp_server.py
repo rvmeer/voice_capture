@@ -24,6 +24,7 @@ setup_logging(enable_console=False)
 # Import recording manager for title updates (after logging is configured)
 from recording_manager import RecordingManager
 from transcription_utils import remove_overlap
+from qdrant import QdrantIndexer, QdrantUnavailableError
 
 logger = get_logger(__name__)
 
@@ -35,6 +36,16 @@ RECORDINGS_DIR = Path.home() / "Documents" / "VoiceCapture"
 
 # Initialize recording manager with same directory
 recording_manager = RecordingManager(recordings_dir=str(RECORDINGS_DIR))
+
+# Optional Qdrant indexer (best effort)
+qdrant_indexer = None
+try:
+    qdrant_indexer = QdrantIndexer(recordings_dir=RECORDINGS_DIR)
+    qdrant_indexer.init_collection(force_recreate=False)
+except QdrantUnavailableError:
+    qdrant_indexer = None
+except Exception:
+    qdrant_indexer = None
 
 
 def load_recordings() -> list[dict]:
@@ -219,6 +230,43 @@ async def handle_list_tools() -> list[Tool]:
                 "required": []
             }
         ),
+        Tool(
+            name="search_recordings",
+            description="Semantic search in transcripts using Qdrant. Works on live segments during recording and final chunks after reindex.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results",
+                        "default": 10
+                    },
+                    "recording_id": {
+                        "type": "string",
+                        "description": "Optional filter for one recording"
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
+            name="reindex_recording",
+            description="Reindex a specific recording in Qdrant based on final transcription.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "recording_id": {
+                        "type": "string",
+                        "description": "Recording ID to reindex"
+                    }
+                },
+                "required": ["recording_id"]
+            }
+        ),
     ]
 
 
@@ -397,6 +445,40 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             "message": f"Recording {verb}",
             "status": result
         }))]
+
+    elif name == "search_recordings":
+        query = (arguments.get("query") or "").strip()
+        if not query:
+            return [TextContent(type="text", text=json.dumps({"error": "query is required"}))]
+
+        if qdrant_indexer is None:
+            return [TextContent(type="text", text=json.dumps({
+                "error": "Qdrant is not available. Install qdrant-client and sentence-transformers."
+            }))]
+
+        limit = int(arguments.get("limit", 10) or 10)
+        recording_id = arguments.get("recording_id")
+        try:
+            results = qdrant_indexer.search(query, limit=limit, recording_id=recording_id)
+            return [TextContent(type="text", text=json.dumps(results, ensure_ascii=False, indent=2))]
+        except Exception as e:
+            return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
+
+    elif name == "reindex_recording":
+        recording_id = arguments.get("recording_id")
+        if not recording_id:
+            return [TextContent(type="text", text=json.dumps({"error": "recording_id is required"}))]
+
+        if qdrant_indexer is None:
+            return [TextContent(type="text", text=json.dumps({
+                "error": "Qdrant is not available. Install qdrant-client and sentence-transformers."
+            }))]
+
+        try:
+            result = qdrant_indexer.reindex_recording(recording_id)
+            return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        except Exception as e:
+            return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
     else:
         return [

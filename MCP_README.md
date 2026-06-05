@@ -36,7 +36,7 @@ python mcp_server.py
 
 ## Beschikbare Tools
 
-De MCP server biedt 3 tools:
+De MCP server biedt 5 tools:
 
 ### 1. `get_recordings`
 Geeft een lijst van alle opnames met datum en naam.
@@ -261,6 +261,44 @@ pwd
 # Windows (in PowerShell)
 pwd
 ```
+
+### 5. `search_recordings`
+Semantisch zoeken in transcripties via Qdrant.
+
+**Parameters:**
+- `query` (string, verplicht): zoekopdracht
+- `limit` (integer, optioneel, default 10): maximaal aantal resultaten
+- `recording_id` (string, optioneel): filter op één opname
+
+**Voorbeeld aanroep:**
+```json
+{
+  "query": "trein naar Parijs",
+  "limit": 5
+}
+```
+
+### 6. `reindex_recording`
+Herindexeer een specifieke opname op basis van de finale transcriptie.
+
+**Parameters:**
+- `recording_id` (string, verplicht): opname-ID
+
+## Qdrant CLI (initiële opbouw)
+
+Voor het opbouwen en beheren van de vector-index:
+
+```bash
+python qdrant.py init
+python qdrant.py build
+python qdrant.py search --query "meeting over roadmap" --limit 5
+python qdrant.py reindex --recording-id 20250122_143022
+```
+
+Live opname-flow:
+- Tijdens opname worden transcriptie-segmenten direct geïndexeerd (`raw_segment`)
+- Vanaf segment 2 wordt ook een context-window geïndexeerd (`window_segment` = segment n-1 + n)
+- Na afronden van opname wordt de opname geherindexeerd als `final_chunk` (chunking + overlap)
 
 ## Foutafhandeling
 

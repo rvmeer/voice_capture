@@ -41,6 +41,7 @@ from transcription_utils import remove_overlap, is_empty_segment
 from tray_actions import TrayActions
 import ollama_utils
 from transcribe_server import start_transcribe_server_in_background
+from qdrant import QdrantIndexer, QdrantUnavailableError
 
 try:
     from pynput import keyboard as pynput_keyboard
@@ -301,7 +302,13 @@ class VoiceCapture(QObject):
         # Track segments for incremental transcription
         self.segments_to_transcribe = []  # Queue of segments to transcribe
         self.transcribed_segments = []  # List of transcribed texts
+        self.transcribed_segment_map = {}  # {segment_num: text} for live qdrant window indexing
         self.is_transcribing_segment = False  # Flag to track if currently transcribing
+
+        # Qdrant live index (best effort)
+        self.qdrant_indexer = None
+        self.qdrant_enabled = False
+        self.init_qdrant()
 
         # Track pending recording name (set when recording stops)
         self.pending_recording_name = None
@@ -354,6 +361,20 @@ class VoiceCapture(QObject):
 
         # Start async transcribe API server on port 5152 (localhost only)
         start_transcribe_server_in_background(host="127.0.0.1", port=5152)
+
+    def init_qdrant(self):
+        """Initialize Qdrant indexer (best effort, app keeps working without it)."""
+        try:
+            self.qdrant_indexer = QdrantIndexer(recordings_dir=self.base_recordings_dir)
+            self.qdrant_indexer.init_collection(force_recreate=False)
+            self.qdrant_enabled = True
+            logger.info("Qdrant indexing enabled")
+        except QdrantUnavailableError as e:
+            self.qdrant_enabled = False
+            logger.info(f"Qdrant indexing disabled: {e}")
+        except Exception as e:
+            self.qdrant_enabled = False
+            logger.warning(f"Qdrant initialization failed: {e}")
 
     def _settings_path(self) -> Path:
         return self.base_recordings_dir / "settings.json"
@@ -1025,6 +1046,7 @@ class VoiceCapture(QObject):
         # Clear previous segments
         self.segments_to_transcribe = []
         self.transcribed_segments = []
+        self.transcribed_segment_map = {}
         self.consecutive_empty_segments = 0
         self.empty_segment_warning_shown = False
 
@@ -1186,8 +1208,26 @@ class VoiceCapture(QObject):
                     "Controleer of uw microfoon correct werkt en geluid opneemt.",
                     QMessageBox.StandardButton.Ok
                 )
-        else:
-            self.consecutive_empty_segments = 0
+            return
+
+        self.consecutive_empty_segments = 0
+        self.transcribed_segment_map[segment_num] = text
+
+        # Live ingest into Qdrant (best effort)
+        if self.qdrant_enabled and self.qdrant_indexer and self.current_recording_id:
+            try:
+                recording = self.recording_manager.get_recording(self.current_recording_id) or {}
+                prev_text = self.transcribed_segment_map.get(segment_num - 1)
+                self.qdrant_indexer.index_live_segment(
+                    recording_id=self.current_recording_id,
+                    segment_num=segment_num,
+                    text=text,
+                    recording_name=recording.get("name"),
+                    recording_date=recording.get("date"),
+                    prev_segment_text=prev_text,
+                )
+            except Exception as e:
+                logger.warning(f"Qdrant live segment indexing failed for segment {segment_num}: {e}")
 
     def check_and_finalize_recording(self):
         """Check if all segments are transcribed and finalize recording"""
@@ -1317,6 +1357,14 @@ class VoiceCapture(QObject):
                 QSystemTrayIcon.MessageIcon.Information,
                 3000
             )
+
+        # Reindex final transcript in Qdrant (replaces live segment points for this recording)
+        if self.qdrant_enabled and self.qdrant_indexer:
+            try:
+                self.qdrant_indexer.reindex_recording(self.current_recording_id)
+                logger.info(f"Qdrant reindexed recording {self.current_recording_id}")
+            except Exception as e:
+                logger.warning(f"Qdrant reindex failed for {self.current_recording_id}: {e}")
 
         # Generate title via Ollama if enabled (availability is checked fresh inside the thread)
         if self.determine_title and self.selected_ollama_model:

@@ -7,6 +7,8 @@ pydantic
 mcp
 python-dotenv
 pynput
+qdrant-client
+sentence-transformers
 
 # Optional: MLX Whisper for Apple Silicon (much faster on M1/M2/M3)
 # Only works on macOS with Apple Silicon

@@ -25,6 +25,8 @@ classifiers = [
 
 dependencies = [
     "mcp>=1.0.0",
+    "qdrant-client>=1.9.0",
+    "sentence-transformers>=3.0.0",
 ]
 
 [project.scripts]
@@ -37,6 +39,7 @@ Repository = "https://github.com/rvmeer/voice_capture"
 [tool.hatch.build.targets.wheel]
 only-include = [
     "mcp_server.py",
+    "qdrant.py",
     "logging_config.py",
     "recording_manager.py",
     "transcription_utils.py",
@@ -45,6 +48,7 @@ only-include = [
 [tool.hatch.build.targets.sdist]
 only-include = [
     "mcp_server.py",
+    "qdrant.py",
     "logging_config.py",
     "recording_manager.py",
     "transcription_utils.py",
