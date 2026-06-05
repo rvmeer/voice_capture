@@ -222,6 +222,15 @@ async def handle_list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="get_current_recording_id",
+            description="Get the current recording status and active recording ID from Voice Capture.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
+        Tool(
             name="search_recordings",
             description="Semantic search in transcripts using Qdrant. Works on live segments during recording and final chunks after reindex.",
             inputSchema={
@@ -416,8 +425,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
                 )
             ]
 
-    elif name in ("start_recording", "stop_recording"):
-        endpoint = "/start" if name == "start_recording" else "/stop"
+    elif name in ("start_recording", "stop_recording", "get_current_recording_id"):
+        endpoint = "/status" if name == "get_current_recording_id" else ("/start" if name == "start_recording" else "/stop")
 
         def api_call(method, path):
             url = INTERNAL_API_BASE + path
@@ -435,6 +444,13 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         if status is None:
             return [TextContent(type="text", text=json.dumps({
                 "error": "Voice Capture app is not running"
+            }))]
+
+        if name == "get_current_recording_id":
+            return [TextContent(type="text", text=json.dumps({
+                "is_recording": bool(status.get("is_recording")),
+                "recording_id": status.get("recording_id"),
+                "qdrant_enabled": status.get("qdrant_enabled")
             }))]
 
         # Guard against no-ops
