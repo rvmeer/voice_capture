@@ -23,8 +23,9 @@ Deze app is gemaakt voor eindgebruikers die snel willen opnemen + teruglezen, zo
 6. **Microfoon/input selectie** via tray menu
 7. **Automatisch opslaan** van audio + transcriptie per opname
 8. **Lege opnames automatisch opgeschoond**
-9. **API toegang via FastAPI** (`/docs` beschikbaar)
-10. **MCP integratie** voor Claude/Desktop tooling
+9. **Vector database (Qdrant) voor semantisch zoeken** in transcripties (ook live tijdens opname)
+10. **API toegang via FastAPI** (`/docs` beschikbaar)
+11. **MCP integratie** voor Claude/Desktop tooling, inclusief semantic search tools
 
 ## Snelle start
 
@@ -245,6 +246,52 @@ Zie [OPENAPI_README.md](OPENAPI_README.md) voor meer details.
 
 ### MCP Server:
 Voor gebruik met Claude Desktop, zie [MCP_README.md](MCP_README.md).
+
+## Vector Database (Qdrant) voor Semantic Search
+
+Voice Capture ondersteunt semantisch zoeken in transcripties via Qdrant.
+
+### Installatie
+
+```bash
+pip install qdrant-client sentence-transformers
+```
+
+Standaard embedding model:
+- `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+
+### CLI gebruik
+
+1. Initialiseer de collectie:
+```bash
+python qdrant.py init
+```
+
+2. Bouw de initiële index op uit bestaande opnames:
+```bash
+python qdrant.py build
+```
+
+3. Zoek semantisch in transcripties:
+```bash
+python qdrant.py search --query "trein naar parijs" --limit 5
+```
+
+4. Herindexeer één opname (bijv. na hertranscriptie):
+```bash
+python qdrant.py reindex --recording-id 20250122_143022
+```
+
+### Live indexing tijdens opname
+
+- Tijdens opname worden getranscribeerde segmenten direct naar Qdrant geschreven (`raw_segment`)
+- Daarnaast wordt een rolling context-window geschreven (`window_segment`: segment n-1 + n)
+- Na afronding van de opname wordt dezelfde opname opnieuw opgebouwd als finale chunks met overlap (`final_chunk`)
+
+### Embedded vs server mode
+
+- **Embedded (default)**: data in `~/Documents/VoiceCapture/qdrant_data`
+- **Server mode (aanbevolen bij hoge load/concurrency)**: zet `QDRANT_URL` naar je Qdrant instance (bijv. Docker op `http://localhost:6333`)
 
 ## Transcribe API (poort 5152)
 
