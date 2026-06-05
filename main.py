@@ -206,6 +206,18 @@ class RecordingAPIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json_body(self):
+        content_length = int(self.headers.get("Content-Length", "0") or 0)
+        if content_length <= 0:
+            return {}
+        raw = self.rfile.read(content_length)
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+
     def do_GET(self):
         if self.path != "/status":
             self._respond(404, {"error": "Not found"})
@@ -214,10 +226,15 @@ class RecordingAPIHandler(BaseHTTPRequestHandler):
         self._respond(200, {
             "is_recording": vc.is_recording if vc else False,
             "recording_id": vc.current_recording_id if vc else None,
+            "qdrant_enabled": bool(vc and vc.qdrant_enabled),
         })
 
     def do_POST(self):
-        if self.path not in ("/start", "/stop"):
+        allowed_paths = (
+            "/start", "/stop",
+            "/qdrant/search", "/qdrant/reindex", "/qdrant/build", "/qdrant/init",
+        )
+        if self.path not in allowed_paths:
             self._respond(404, {"error": "Not found"})
             return
 
@@ -227,25 +244,64 @@ class RecordingAPIHandler(BaseHTTPRequestHandler):
             self._respond(503, {"error": "App not ready"})
             return
 
-        action = self.path[1:]  # "start" or "stop"
+        body = self._read_json_body()
+        if body is None:
+            self._respond(400, {"error": "Invalid JSON body"})
+            return
 
         def execute():
-            if action == "start" and not vc.is_recording:
-                vc.on_tray_toggle_recording()
-            elif action == "stop" and vc.is_recording:
-                vc.on_tray_toggle_recording()
-            return {
-                "success": True,
-                "is_recording": vc.is_recording,
-                "recording_id": vc.current_recording_id,
-            }
+            if self.path in ("/start", "/stop"):
+                action = self.path[1:]  # "start" or "stop"
+                if action == "start" and not vc.is_recording:
+                    vc.on_tray_toggle_recording()
+                elif action == "stop" and vc.is_recording:
+                    vc.on_tray_toggle_recording()
+                return {
+                    "success": True,
+                    "is_recording": vc.is_recording,
+                    "recording_id": vc.current_recording_id,
+                }
 
-        result = bridge.run(execute)
+            if not vc.qdrant_enabled or vc.qdrant_indexer is None:
+                return {"error": "Qdrant is not enabled in Voice Capture"}
+
+            if self.path == "/qdrant/search":
+                query = (body.get("query") or "").strip()
+                if not query:
+                    return {"error": "query is required"}
+                limit = int(body.get("limit", 10) or 10)
+                recording_id = body.get("recording_id")
+                results = vc.qdrant_indexer.search(query, limit=limit, recording_id=recording_id)
+                return {"success": True, "results": results}
+
+            if self.path == "/qdrant/reindex":
+                recording_id = body.get("recording_id")
+                if not recording_id:
+                    return {"error": "recording_id is required"}
+                result = vc.qdrant_indexer.reindex_recording(recording_id)
+                return {"success": True, "result": result}
+
+            if self.path == "/qdrant/build":
+                recording_id = body.get("recording_id")
+                result = vc.qdrant_indexer.index_recordings(recording_id=recording_id)
+                return {"success": True, "result": result}
+
+            if self.path == "/qdrant/init":
+                force_recreate = bool(body.get("force_recreate", False))
+                result = vc.qdrant_indexer.init_collection(force_recreate=force_recreate)
+                return {"success": True, "result": result}
+
+            return {"error": "Unknown action"}
+
+        result = bridge.run(execute, timeout=30)
 
         if result is None:
             self._respond(504, {"error": "Timeout waiting for Qt main thread"})
-        else:
-            self._respond(200, result)
+            return
+        if isinstance(result, dict) and result.get("error"):
+            self._respond(400, result)
+            return
+        self._respond(200, result)
 
 
 class VoiceCapture(QObject):

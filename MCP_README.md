@@ -265,6 +265,8 @@ pwd
 ### 5. `search_recordings`
 Semantisch zoeken in transcripties via Qdrant.
 
+**Let op**: deze tool proxy't nu via de interne Voice Capture API (`127.0.0.1:5151/qdrant/search`) zodat er één centrale Qdrant-client is en geen embedded lock-conflict tussen processen.
+
 **Parameters:**
 - `query` (string, verplicht): zoekopdracht
 - `limit` (integer, optioneel, default 10): maximaal aantal resultaten
@@ -280,6 +282,8 @@ Semantisch zoeken in transcripties via Qdrant.
 
 ### 6. `reindex_recording`
 Herindexeer een specifieke opname op basis van de finale transcriptie.
+
+**Let op**: ook dit gaat via de interne Voice Capture API (`/qdrant/reindex`) en niet meer via een aparte Qdrant-client in de MCP-server.
 
 **Parameters:**
 - `recording_id` (string, verplicht): opname-ID

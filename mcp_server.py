@@ -24,7 +24,6 @@ setup_logging(enable_console=False)
 # Import recording manager for title updates (after logging is configured)
 from recording_manager import RecordingManager
 from transcription_utils import remove_overlap
-from qdrant import QdrantIndexer, QdrantUnavailableError
 
 logger = get_logger(__name__)
 
@@ -37,15 +36,7 @@ RECORDINGS_DIR = Path.home() / "Documents" / "VoiceCapture"
 # Initialize recording manager with same directory
 recording_manager = RecordingManager(recordings_dir=str(RECORDINGS_DIR))
 
-# Optional Qdrant indexer (best effort)
-qdrant_indexer = None
-try:
-    qdrant_indexer = QdrantIndexer(recordings_dir=RECORDINGS_DIR)
-    qdrant_indexer.init_collection(force_recreate=False)
-except QdrantUnavailableError:
-    qdrant_indexer = None
-except Exception:
-    qdrant_indexer = None
+# Qdrant operations are proxied via INTERNAL_API_BASE (/qdrant/*)
 
 
 def load_recordings() -> list[dict]:
@@ -267,6 +258,34 @@ async def handle_list_tools() -> list[Tool]:
                 "required": ["recording_id"]
             }
         ),
+        Tool(
+            name="init_qdrant",
+            description="Initialize Qdrant collection via the running Voice Capture app.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "force_recreate": {
+                        "type": "boolean",
+                        "description": "Drop and recreate the collection"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="build_qdrant_index",
+            description="Build or update Qdrant index from recordings via the running Voice Capture app.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "recording_id": {
+                        "type": "string",
+                        "description": "Optional: only index one recording"
+                    }
+                },
+                "required": []
+            }
+        ),
     ]
 
 
@@ -446,39 +465,81 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             "status": result
         }))]
 
-    elif name == "search_recordings":
-        query = (arguments.get("query") or "").strip()
-        if not query:
-            return [TextContent(type="text", text=json.dumps({"error": "query is required"}))]
+    elif name in ("search_recordings", "reindex_recording", "init_qdrant", "build_qdrant_index"):
+        loop = asyncio.get_event_loop()
 
-        if qdrant_indexer is None:
-            return [TextContent(type="text", text=json.dumps({
-                "error": "Qdrant is not available. Install qdrant-client and sentence-transformers."
-            }))]
+        def api_call(method, path, payload=None):
+            url = INTERNAL_API_BASE + path
+            data = None
+            headers = {"Content-Type": "application/json"}
+            if payload is not None:
+                data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, method=method, data=data, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                try:
+                    return json.loads(e.read())
+                except Exception:
+                    return {"error": f"HTTP {e.code}"}
+            except urllib.error.URLError:
+                return None
 
-        limit = int(arguments.get("limit", 10) or 10)
-        recording_id = arguments.get("recording_id")
-        try:
-            results = qdrant_indexer.search(query, limit=limit, recording_id=recording_id)
-            return [TextContent(type="text", text=json.dumps(results, ensure_ascii=False, indent=2))]
-        except Exception as e:
-            return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
+        if name == "search_recordings":
+            query = (arguments.get("query") or "").strip()
+            if not query:
+                return [TextContent(type="text", text=json.dumps({"error": "query is required"}))]
 
-    elif name == "reindex_recording":
-        recording_id = arguments.get("recording_id")
-        if not recording_id:
-            return [TextContent(type="text", text=json.dumps({"error": "recording_id is required"}))]
+            payload = {
+                "query": query,
+                "limit": int(arguments.get("limit", 10) or 10),
+                "recording_id": arguments.get("recording_id"),
+            }
+            result = await loop.run_in_executor(None, lambda: api_call("POST", "/qdrant/search", payload))
+            if result is None:
+                return [TextContent(type="text", text=json.dumps({"error": "Voice Capture app is not running"}))]
+            if result.get("error"):
+                return [TextContent(type="text", text=json.dumps(result))]
+            return [TextContent(type="text", text=json.dumps(result.get("results", []), ensure_ascii=False, indent=2))]
 
-        if qdrant_indexer is None:
-            return [TextContent(type="text", text=json.dumps({
-                "error": "Qdrant is not available. Install qdrant-client and sentence-transformers."
-            }))]
+        if name == "reindex_recording":
+            recording_id = arguments.get("recording_id")
+            if not recording_id:
+                return [TextContent(type="text", text=json.dumps({"error": "recording_id is required"}))]
 
-        try:
-            result = qdrant_indexer.reindex_recording(recording_id)
-            return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-        except Exception as e:
-            return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
+            result = await loop.run_in_executor(
+                None,
+                lambda: api_call("POST", "/qdrant/reindex", {"recording_id": recording_id}),
+            )
+            if result is None:
+                return [TextContent(type="text", text=json.dumps({"error": "Voice Capture app is not running"}))]
+            if result.get("error"):
+                return [TextContent(type="text", text=json.dumps(result))]
+            return [TextContent(type="text", text=json.dumps(result.get("result", {}), ensure_ascii=False, indent=2))]
+
+        if name == "init_qdrant":
+            result = await loop.run_in_executor(
+                None,
+                lambda: api_call("POST", "/qdrant/init", {"force_recreate": bool(arguments.get("force_recreate", False))}),
+            )
+            if result is None:
+                return [TextContent(type="text", text=json.dumps({"error": "Voice Capture app is not running"}))]
+            if result.get("error"):
+                return [TextContent(type="text", text=json.dumps(result))]
+            return [TextContent(type="text", text=json.dumps(result.get("result", {}), ensure_ascii=False, indent=2))]
+
+        if name == "build_qdrant_index":
+            payload = {"recording_id": arguments.get("recording_id")}
+            result = await loop.run_in_executor(
+                None,
+                lambda: api_call("POST", "/qdrant/build", payload),
+            )
+            if result is None:
+                return [TextContent(type="text", text=json.dumps({"error": "Voice Capture app is not running"}))]
+            if result.get("error"):
+                return [TextContent(type="text", text=json.dumps(result))]
+            return [TextContent(type="text", text=json.dumps(result.get("result", {}), ensure_ascii=False, indent=2))]
 
     else:
         return [
