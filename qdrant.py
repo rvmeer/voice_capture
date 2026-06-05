@@ -115,6 +115,15 @@ class QdrantIndexer:
         if self._embedder is not None:
             return self._embedder
 
+        # Keep HF Hub quiet in app logs (e.g. unauthenticated token hints)
+        os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+        try:
+            from huggingface_hub.utils import logging as hf_logging
+            hf_logging.set_verbosity_error()
+        except Exception:
+            pass
+
         SentenceTransformer = self._require_embedder()
         logger.info(f"Loading embedding model: {self.embedding_model_name}")
         self._embedder = SentenceTransformer(self.embedding_model_name)
