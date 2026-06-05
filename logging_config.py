@@ -31,8 +31,7 @@ def setup_logging(name: str = "voice_capture", enable_console: bool = True) -> l
     logger.setLevel(logging.DEBUG)
 
     # Create logs directory next to recordings directory
-    base_dir = Path.home() / "Documents" / "VoiceCapture"
-    logs_dir = base_dir / "logs"
+    logs_dir = Path.home() / "Library" / "Logs" / "VoiceCapture"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     # Create formatters
