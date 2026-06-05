@@ -66,7 +66,8 @@ class QdrantIndexer:
         self._vector_size = None
 
         self._qdrant_url = qdrant_url if qdrant_url is not None else os.getenv("QDRANT_URL")
-        self._qdrant_path = Path(qdrant_path) if qdrant_path else Path(os.getenv("QDRANT_PATH", str(self.recordings_dir / "qdrant_data")))
+        default_qdrant_path = Path.home() / "Library" / "Application Support" / "VoiceCapture" / "qdrant_data"
+        self._qdrant_path = Path(qdrant_path) if qdrant_path else Path(os.getenv("QDRANT_PATH", str(default_qdrant_path)))
 
     # ---------- lazy dependencies ----------
 
@@ -482,7 +483,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recordings-dir", default=None, help="Path naar VoiceCapture recordings map")
     parser.add_argument("--collection", default=None, help="Qdrant collection name")
     parser.add_argument("--qdrant-url", default=None, help="Qdrant URL (bijv. http://localhost:6333)")
-    parser.add_argument("--qdrant-path", default=None, help="Embedded Qdrant path (default: ~/Documents/VoiceCapture/qdrant_data)")
+    parser.add_argument("--qdrant-path", default=None, help="Embedded Qdrant path (default: ~/Library/Application Support/VoiceCapture/qdrant_data)")
     parser.add_argument("--embedding-model", default=None, help="SentenceTransformer model name")
 
     sub = parser.add_subparsers(dest="command", required=True)
