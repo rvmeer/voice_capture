@@ -361,10 +361,11 @@ class VoiceCapture(QObject):
         self.transcribed_segment_map = {}  # {segment_num: text} for live qdrant window indexing
         self.is_transcribing_segment = False  # Flag to track if currently transcribing
 
-        # Qdrant live index (best effort)
+        # Qdrant live index (best effort) — initialized in background to avoid blocking startup
         self.qdrant_indexer = None
         self.qdrant_enabled = False
-        self.init_qdrant()
+        self._qdrant_init_done = False
+        threading.Thread(target=self.init_qdrant, daemon=True, name="qdrant-init").start()
 
         # Track pending recording name (set when recording stops)
         self.pending_recording_name = None
@@ -431,6 +432,8 @@ class VoiceCapture(QObject):
         except Exception as e:
             self.qdrant_enabled = False
             logger.warning(f"Qdrant initialization failed: {e}")
+        finally:
+            self._qdrant_init_done = True
 
     def _settings_path(self) -> Path:
         return self.base_recordings_dir / "settings.json"
@@ -1421,6 +1424,8 @@ class VoiceCapture(QObject):
                 logger.info(f"Qdrant reindexed recording {self.current_recording_id}")
             except Exception as e:
                 logger.warning(f"Qdrant reindex failed for {self.current_recording_id}: {e}")
+        elif not self._qdrant_init_done:
+            logger.warning(f"Qdrant was still initializing when recording {self.current_recording_id} finished — recording not indexed")
 
         # Generate title via Ollama if enabled (availability is checked fresh inside the thread)
         if self.determine_title and self.selected_ollama_model:
