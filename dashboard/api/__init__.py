@@ -77,9 +77,10 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_fallback(full_path: str) -> Any:
-            # Serve index.html for all non-API paths so React Router works on refresh
             from fastapi.responses import FileResponse
+            candidate = dist_dir / full_path
+            if candidate.exists() and candidate.is_file():
+                return FileResponse(candidate)
             return FileResponse(index_html)
 
-        app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
     return app
