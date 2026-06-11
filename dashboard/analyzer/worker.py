@@ -1,0 +1,131 @@
+"""Background AI worker for pending segments."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from dashboard.analyzer.apply import apply_result
+from dashboard.analyzer.provider import AIProvider, AnalysisContext
+from dashboard.db import fetchall, fetchone, get_pool
+
+logger = logging.getLogger(__name__)
+
+
+class AnalyzerWorker:
+    def __init__(self, provider: AIProvider, ws_hub: Any) -> None:
+        self.provider = provider
+        self.ws_hub = ws_hub
+        self._stop = asyncio.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    async def _claim_next_segment(self, conn: Any) -> dict[str, Any] | None:
+        async with conn.transaction():
+            segment = await fetchone(
+                conn,
+                """
+                SELECT *
+                FROM segment
+                WHERE ai_status = 'pending'
+                ORDER BY id
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+                """,
+            )
+            if not segment:
+                return None
+            await conn.execute("UPDATE segment SET ai_status = %s WHERE id = %s", ("processing", segment["id"]))
+            return segment
+
+    async def _build_context(self, conn: Any, segment: dict[str, Any]) -> tuple[AnalysisContext, dict[str, Any]]:
+        recording = await fetchone(
+            conn,
+            "SELECT id, recording_id, title, started_at, ended_at, status FROM recording WHERE id = %s",
+            (segment["recording_id"],),
+        )
+        participants = await fetchall(
+            conn,
+            """
+            SELECT p.id, p.name, p.initials, p.is_user, rp.role, rp.speaking_time_ratio, rp.speaking_seconds, rp.source
+            FROM recording_participant rp
+            JOIN participant p ON p.id = rp.participant_id
+            WHERE rp.recording_id = %s
+            ORDER BY rp.speaking_time_ratio DESC, lower(p.name)
+            """,
+            (recording["recording_id"],),
+        )
+        topics = await fetchall(conn, "SELECT * FROM topic ORDER BY occurrence_count DESC, lower(label)")
+        goals = await fetchall(conn, "SELECT * FROM goal WHERE recording_id = %s ORDER BY created_at", (recording["id"],))
+        agenda_items = await fetchall(conn, "SELECT * FROM agenda_item WHERE recording_id = %s ORDER BY position", (recording["id"],))
+        recent_segments = await fetchall(
+            conn,
+            """
+            SELECT s.id, s.segment_num, s.text, s.speaker_label, s.ts, s.duration_seconds, p.name AS participant_name
+            FROM segment s
+            LEFT JOIN participant p ON p.id = s.participant_id
+            WHERE s.recording_id = %s AND s.id <= %s
+            ORDER BY s.id DESC
+            LIMIT 6
+            """,
+            (recording["id"], segment["id"]),
+        )
+        recent_segments.reverse()
+        context = AnalysisContext(
+            recording=recording,
+            segment=segment,
+            participants=participants,
+            topics=topics,
+            goals=goals,
+            agenda_items=agenda_items,
+            recent_segments=recent_segments,
+        )
+        return context, recording
+
+    async def _handle_failure(self, conn: Any, segment: dict[str, Any], exc: Exception) -> None:
+        attempts = int(segment.get("ai_attempts") or 0) + 1
+        next_status = "failed" if attempts >= 3 else "pending"
+        await conn.execute(
+            """
+            UPDATE segment
+            SET ai_status = %s,
+                ai_attempts = %s
+            WHERE id = %s
+            """,
+            (next_status, attempts, segment["id"]),
+        )
+        await conn.commit()
+        logger.warning("AI processing failed for segment %s: %s", segment["id"], exc)
+        if next_status == "pending":
+            await asyncio.sleep(min(2**attempts, 8))
+
+    async def run(self) -> None:
+        pool = get_pool()
+        while not self._stop.is_set():
+            try:
+                async with pool.connection() as conn:
+                    segment = await self._claim_next_segment(conn)
+                    if not segment:
+                        await asyncio.sleep(1.0)
+                        continue
+                    context, recording = await self._build_context(conn, segment)
+                    try:
+                        result = await self.provider.analyze(context)
+                        await apply_result(
+                            conn,
+                            recording_uuid=recording["id"],
+                            recording_vc_id=recording["recording_id"],
+                            segment_id=segment["id"],
+                            result=result,
+                            ws_hub=self.ws_hub,
+                        )
+                        await conn.commit()
+                    except Exception as exc:
+                        await self._handle_failure(conn, segment, exc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception("Analyzer worker loop failed: %s", exc)
+                await asyncio.sleep(1.0)

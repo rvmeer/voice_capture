@@ -367,6 +367,10 @@ class VoiceCapture(QObject):
         self._qdrant_init_done = False
         threading.Thread(target=self.init_qdrant, daemon=True, name="qdrant-init").start()
 
+        # Dashboard client (best effort) — initialized in background to avoid blocking startup
+        self.dashboard_client = None
+        threading.Thread(target=self._init_dashboard_client, daemon=True, name="dashboard-init").start()
+
         # Track pending recording name (set when recording stops)
         self.pending_recording_name = None
 
@@ -434,6 +438,16 @@ class VoiceCapture(QObject):
             logger.warning(f"Qdrant initialization failed: {e}")
         finally:
             self._qdrant_init_done = True
+
+    def _init_dashboard_client(self):
+        try:
+            from dashboard_client import DashboardClient
+            self.dashboard_client = DashboardClient()
+            logger.info("Dashboard client initialized")
+        except ImportError:
+            logger.info("Dashboard client not available (dashboard deps not installed)")
+        except Exception as e:
+            logger.warning(f"Dashboard client initialization failed: {e}")
 
     def _settings_path(self) -> Path:
         return self.base_recordings_dir / "settings.json"
@@ -1135,6 +1149,17 @@ class VoiceCapture(QObject):
 
         logger.info(f"Recording started with ID: {self.current_recording_id}")
 
+        # Notify dashboard (best effort)
+        if self.dashboard_client:
+            try:
+                self.dashboard_client.recording_started(
+                    self.current_recording_id,
+                    recording_name,
+                    datetime.now()
+                )
+            except Exception as e:
+                logger.warning(f"Dashboard recording_started failed: {e}")
+
     def on_segment_ready(self, segment_file, segment_num):
         """Called when a new segment is ready"""
         logger.debug(f"Segment {segment_num} ready: {segment_file}")
@@ -1288,6 +1313,19 @@ class VoiceCapture(QObject):
             except Exception as e:
                 logger.warning(f"Qdrant live segment indexing failed for segment {segment_num}: {e}")
 
+        # Dashboard live segment push (best effort)
+        if self.dashboard_client and self.current_recording_id:
+            try:
+                self.dashboard_client.segment(
+                    self.current_recording_id,
+                    segment_num,
+                    text,
+                    datetime.now(),
+                    self.segment_duration,
+                )
+            except Exception as e:
+                logger.warning(f"Dashboard segment push failed for segment {segment_num}: {e}")
+
     def check_and_finalize_recording(self):
         """Check if all segments are transcribed and finalize recording"""
         if not self.current_recording_id:
@@ -1426,6 +1464,13 @@ class VoiceCapture(QObject):
                 logger.warning(f"Qdrant reindex failed for {self.current_recording_id}: {e}")
         elif not self._qdrant_init_done:
             logger.warning(f"Qdrant was still initializing when recording {self.current_recording_id} finished — recording not indexed")
+
+        # Notify dashboard recording ended (best effort)
+        if self.dashboard_client and self.current_recording_id:
+            try:
+                self.dashboard_client.recording_ended(self.current_recording_id, datetime.now())
+            except Exception as e:
+                logger.warning(f"Dashboard recording_ended failed: {e}")
 
         # Generate title via Ollama if enabled (availability is checked fresh inside the thread)
         if self.determine_title and self.selected_ollama_model:
