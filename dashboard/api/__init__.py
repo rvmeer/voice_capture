@@ -7,6 +7,8 @@ import contextlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -71,5 +73,13 @@ def create_app() -> FastAPI:
 
     dist_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     if dist_dir.exists():
-        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
+        index_html = dist_dir / "index.html"
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str) -> Any:
+            # Serve index.html for all non-API paths so React Router works on refresh
+            from fastapi.responses import FileResponse
+            return FileResponse(index_html)
+
+        app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
     return app
