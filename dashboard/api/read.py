@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from dashboard.api.setup import get_recording_row
 from dashboard.db import fetchall, get_db_connection
-from dashboard.stats import apply_overdue, header_stats, speaking_ratios, tone_window
+from dashboard.stats import TONE_WINDOW_SIZE, apply_overdue, header_stats, speaking_ratios, tone_window
 
 router = APIRouter(tags=["read"])
 
@@ -101,7 +101,7 @@ async def recording_snapshot(recording_id: str, conn: Any = Depends(get_db_conne
     )
     sentiments = await fetchall(
         conn,
-        "SELECT sentiment FROM segment WHERE recording_id = %s AND sentiment IS NOT NULL ORDER BY id DESC LIMIT 6",
+        f"SELECT sentiment FROM segment WHERE recording_id = %s AND sentiment IS NOT NULL ORDER BY id DESC LIMIT {TONE_WINDOW_SIZE}",
         (recording["id"],),
     )
     tone = tone_window([row["sentiment"] for row in reversed(sentiments)])

@@ -48,7 +48,7 @@ export default function HomePage() {
       .split('\n').map((s) => s.trim()).filter(Boolean)
       .map((s) => ({ label: s }));
 
-    await fetch('/recordings/precreate', {
+    const res = await fetch('/recordings/precreate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -59,6 +59,11 @@ export default function HomePage() {
         topics,
       }),
     });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      alert(`Failed to save pre-configuration (${res.status}): ${body}`);
+      return;
+    }
     setSetupSent(true);
     setSetupOpen(false);
   }

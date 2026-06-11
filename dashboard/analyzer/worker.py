@@ -37,7 +37,7 @@ class AnalyzerWorker:
             )
             if not segment:
                 return None
-            await conn.execute("UPDATE segment SET ai_status = %s WHERE id = %s", ("processing", segment["id"]))
+            await conn.execute("UPDATE segment SET ai_status = %s, claimed_at = now() WHERE id = %s", ("processing", segment["id"]))
             return segment
 
     async def _build_context(self, conn: Any, segment: dict[str, Any]) -> tuple[AnalysisContext, dict[str, Any]]:
@@ -107,7 +107,8 @@ class AnalyzerWorker:
             """
             UPDATE segment
             SET ai_status = %s,
-                ai_attempts = %s
+                ai_attempts = %s,
+                claimed_at = NULL
             WHERE id = %s
             """,
             (next_status, attempts, segment["id"]),
@@ -123,9 +124,10 @@ class AnalyzerWorker:
             """
             UPDATE segment
             SET ai_status = 'pending',
-                ai_attempts = LEAST(ai_attempts + 1, 2)
+                ai_attempts = ai_attempts + 1,
+                claimed_at = NULL
             WHERE ai_status = 'processing'
-              AND (ai_processed_at IS NULL OR ai_processed_at < now() - interval '3 minutes')
+              AND claimed_at < now() - interval '3 minutes'
             """,
         )
         await conn.commit()

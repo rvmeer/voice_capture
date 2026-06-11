@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+TONE_WINDOW_SIZE = 18  # number of segments (~3 min at 10 s/segment)
+
 
 def tone_window(sentiments: list[float | None]) -> dict[str, float | str]:
     values = [float(value) for value in sentiments if value is not None]

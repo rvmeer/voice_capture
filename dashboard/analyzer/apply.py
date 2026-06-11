@@ -10,7 +10,7 @@ from typing import Any
 from dashboard.api.setup import ensure_participant, ensure_topic, resolve_participant_ref, resolve_topic_ref
 from dashboard.context.past_refs import auto_check
 from dashboard.db import fetchall, fetchone
-from dashboard.stats import header_stats, tone_window
+from dashboard.stats import TONE_WINDOW_SIZE, header_stats, tone_window
 
 
 def _normalize_text(value: str) -> str:
@@ -19,6 +19,26 @@ def _normalize_text(value: str) -> str:
 
 def _dedup_hash(value: str) -> str:
     return hashlib.sha256(_normalize_text(value).encode("utf-8")).hexdigest()[:16]
+
+
+def apply_agenda_transition(items: list[dict], new_active_id: int, now: str) -> list[dict]:
+    """Pure function: mark active items done, activate `new_active_id` (unless already done)."""
+    result = []
+    for item in items:
+        if item["status"] == "active" and item["id"] != new_active_id:
+            result.append({**item, "status": "done", "ended_at": now})
+        elif item["id"] == new_active_id and item["status"] != "done":
+            result.append({**item, "status": "active", "started_at": item.get("started_at") or now})
+        else:
+            result.append(item)
+    return result
+
+
+def apply_goal_latch(current_status: str, requested_status: str) -> str:
+    """Achieved is terminal: never downgrade a goal that has been achieved."""
+    if current_status == "achieved" and requested_status != "achieved":
+        return "achieved"
+    return requested_status
 
 
 async def _participant_stats(conn: Any, recording_uuid: str, vc_recording_id: str) -> list[dict[str, Any]]:
@@ -79,7 +99,7 @@ async def _agenda_rows(conn: Any, recording_uuid: str) -> list[dict[str, Any]]:
 async def _tone_payload(conn: Any, recording_uuid: str) -> dict[str, Any]:
     sentiments = await fetchall(
         conn,
-        "SELECT sentiment FROM segment WHERE recording_id = %s AND sentiment IS NOT NULL ORDER BY id DESC LIMIT 18",
+        f"SELECT sentiment FROM segment WHERE recording_id = %s AND sentiment IS NOT NULL ORDER BY id DESC LIMIT {TONE_WINDOW_SIZE}",
         (recording_uuid,),
     )
     return tone_window([row["sentiment"] for row in reversed(sentiments)])

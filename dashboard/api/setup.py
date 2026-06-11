@@ -28,6 +28,13 @@ def _dedup_hash(value: str) -> str:
     return hashlib.sha256(_normalize_text(value).encode("utf-8")).hexdigest()[:16]
 
 
+def topic_label_matches(label: str, existing_label: str, existing_synonyms: list[str]) -> bool:
+    """Return True if `label` matches an existing topic by label or synonym (case-insensitive)."""
+    label_lower = label.strip().lower()
+    if label_lower == existing_label.strip().lower():
+        return True
+    return any(label_lower == s.strip().lower() for s in (existing_synonyms or []))
+
 async def get_recording_row(conn: Any, recording_id: str) -> dict[str, Any]:
     row = await fetchone(
         conn,
