@@ -24,6 +24,22 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         await run_migrations(settings.database_dsn)
         await init_pool(settings.database_dsn)
+        # Reap recordings stuck in 'live' for longer than 4 hours
+        try:
+            async with get_pool().connection() as conn:
+                await conn.execute(
+                    """
+                    UPDATE recording
+                    SET status = 'ended',
+                        ended_at = COALESCE(ended_at, now())
+                    WHERE status = 'live'
+                      AND started_at < now() - interval '4 hours'
+                    """
+                )
+                await conn.commit()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Startup live-recording reap failed: %s", exc)
         worker = AnalyzerWorker(build_provider(settings), ws.ws_hub)
         worker_task = asyncio.create_task(worker.run(), name="dashboard-ai-worker")
         app.state.worker = worker
