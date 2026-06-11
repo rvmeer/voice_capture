@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from dashboard.api.ws import ws_hub
@@ -282,7 +284,22 @@ async def consume_apriori_setup(conn: Any, recording_uuid: str, recording_vc_id:
 
 class PrecreateRequest(BaseModel):
     recording_title_hint: str | None = None
-    payload: dict[str, Any]
+    # Accept either a flat structure (from the UI) or a nested payload dict
+    payload: dict[str, Any] | None = None
+    participants: list[dict[str, Any]] = Field(default_factory=list)
+    agenda: list[dict[str, Any]] = Field(default_factory=list)
+    goals: list[dict[str, Any]] = Field(default_factory=list)
+    topics: list[dict[str, Any]] = Field(default_factory=list)
+
+    def get_payload(self) -> dict[str, Any]:
+        if self.payload:
+            return self.payload
+        return {
+            "participants": self.participants,
+            "agenda": self.agenda,
+            "goals": self.goals,
+            "topics": self.topics,
+        }
 
 
 class ParticipantCreate(BaseModel):
@@ -365,7 +382,7 @@ async def precreate_recording(body: PrecreateRequest, conn: Any = Depends(get_db
         VALUES (%s, %s)
         RETURNING id, recording_title_hint, payload, created_at, consumed
         """,
-        (body.recording_title_hint, body.payload),
+        (body.recording_title_hint, Jsonb(body.get_payload())),
     )
     await conn.commit()
     return await cur.fetchone()

@@ -17,10 +17,15 @@ export default function HomePage() {
   const [setupSent, setSetupSent] = useState(false);
 
   useEffect(() => {
-    fetch('/recordings')
-      .then((r) => r.json())
-      .then((data) => { setRecordings(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    function load() {
+      fetch('/recordings')
+        .then((r) => r.json())
+        .then((data) => { setRecordings(data); setLoading(false); })
+        .catch(() => setLoading(false));
+    }
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
   }, []);
 
   const live = recordings.filter((r) => r.status === 'live');
