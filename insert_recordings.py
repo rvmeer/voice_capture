@@ -40,11 +40,19 @@ def needs_title(name: str) -> bool:
     return not name or name.startswith("Opname ")
 
 
-def resolve_title(rec: dict, ollama_model: str | None) -> str:
-    """Return name from recording, or generate via Ollama if absent or generic."""
+def resolve_title(rec: dict, ollama_model: str | None, existing_db_titles: dict) -> str:
+    """Return name from recording, or generate via Ollama if absent or generic.
+
+    Skips Ollama if the database already has a real (non-generic) title for this recording.
+    """
     name = (rec.get("name") or "").strip()
     if not needs_title(name):
         return name
+
+    # If the DB already has a real title, use it directly — no Ollama call needed
+    db_title = existing_db_titles.get(rec["id"], "")
+    if db_title and not needs_title(db_title):
+        return db_title
 
     transcription = (rec.get("transcription") or "").strip()
     if not transcription:
@@ -72,8 +80,19 @@ def main():
         print("Niets te doen.")
         return
 
-    # Resolve Ollama model (only needed if any recording lacks a real title)
-    needs_ollama = any(needs_title((r.get("name") or "").strip()) for r in recordings)
+    # Connect to DB
+    conn = psycopg2.connect(DB_DSN)
+    cur = conn.cursor()
+
+    # Fetch existing real titles from DB so we skip Ollama for those
+    cur.execute("SELECT recording_id, title FROM recording WHERE title NOT LIKE 'Opname %%'")
+    existing_db_titles = {row[0]: row[1] for row in cur.fetchall()}
+
+    # Resolve Ollama model (only needed if any recording truly lacks a real title)
+    needs_ollama = any(
+        needs_title((r.get("name") or "").strip()) and needs_title(existing_db_titles.get(r["id"], ""))
+        for r in recordings
+    )
     ollama_model = None
     if needs_ollama:
         if check_ollama_available():
@@ -83,28 +102,24 @@ def main():
         else:
             print("[!] Ollama niet bereikbaar — titels worden gegenereerd als fallback")
 
-    # Connect to DB
-    conn = psycopg2.connect(DB_DSN)
-    cur = conn.cursor()
-
     inserted = skipped = 0
 
     for rec in recordings:
         recording_id = rec["id"]
-        title = resolve_title(rec, ollama_model)
+        title = resolve_title(rec, ollama_model, existing_db_titles)
         started_at = parse_started_at(rec["date"])
         ended_at = compute_ended_at(started_at, rec.get("duration"))
 
         try:
             cur.execute(
                 """
-                INSERT INTO meeting (recording_id, title, started_at, ended_at, status)
+                INSERT INTO recording (recording_id, title, started_at, ended_at, status)
                 VALUES (%s, %s, %s, %s, 'ended')
                 ON CONFLICT (recording_id) DO UPDATE
                     SET title = EXCLUDED.title,
                         started_at = EXCLUDED.started_at,
                         ended_at = EXCLUDED.ended_at
-                    WHERE meeting.title LIKE 'Opname %%'
+                    WHERE recording.title LIKE 'Opname %%'
                 """,
                 (recording_id, title, started_at, ended_at),
             )
