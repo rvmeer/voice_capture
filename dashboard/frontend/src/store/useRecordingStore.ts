@@ -56,25 +56,19 @@ export const useRecordingStore = create<RecordingStore>((set, get) => ({
         set({ snapshot: { ...s, agenda_items: items } });
         break;
       }
-      case 'decision.upserted': {
-        const d = event.payload as Decision;
-        const decisions = s.decisions.map((x) => (x.id === d.id ? d : x));
-        if (!decisions.find((x) => x.id === d.id)) decisions.unshift(d);
-        set({ snapshot: { ...s, decisions } });
+      case 'key_moments.updated': {
+        const items = (event.payload as { items: KeyMoment[] }).items;
+        set({ snapshot: { ...s, key_moments: items } });
         break;
       }
-      case 'action_item.upserted': {
-        const ai = event.payload as ActionItem;
-        const items = s.action_items.map((x) => (x.id === ai.id ? ai : x));
-        if (!items.find((x) => x.id === ai.id)) items.push(ai);
+      case 'action_items.updated': {
+        const items = (event.payload as { items: ActionItem[] }).items;
         set({ snapshot: { ...s, action_items: items } });
         break;
       }
-      case 'key_moment.created': {
-        const km = event.payload as KeyMoment;
-        if (!s.key_moments.find((x) => x.id === km.id)) {
-          set({ snapshot: { ...s, key_moments: [km, ...s.key_moments] } });
-        }
+      case 'decisions.updated': {
+        const items = (event.payload as { items: Decision[] }).items;
+        set({ snapshot: { ...s, decisions: items } });
         break;
       }
       case 'participant.stats': {

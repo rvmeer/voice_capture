@@ -7,17 +7,28 @@ function fmtDuration(secs: number | null) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-interface Props { items: AgendaItem[] }
+interface Props {
+  items: AgendaItem[];
+  agendaMode?: 'apriori' | 'dynamic';
+}
 
-export default function AgendaPanel({ items }: Props) {
+export default function AgendaPanel({ items, agendaMode = 'dynamic' }: Props) {
   return (
     <section className="bg-gray-900 rounded-xl p-5 h-full flex flex-col gap-3">
-      <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">📋 Agenda</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">📋 Agenda</h2>
+        {agendaMode === 'apriori' && (
+          <span className="text-xs text-gray-500 border border-gray-700 px-2 py-0.5 rounded-full">Vaste agenda</span>
+        )}
+        {agendaMode === 'dynamic' && items.length > 0 && (
+          <span className="text-xs text-blue-500 border border-blue-800 px-2 py-0.5 rounded-full">Live opgebouwd</span>
+        )}
+      </div>
       {!items.length ? (
         <p className="text-gray-400 text-sm italic">No agenda defined.</p>
       ) : (
         <ol className="flex flex-col gap-2">
-          {items.sort((a, b) => a.position - b.position).map((item) => (
+          {[...items].sort((a, b) => a.position - b.position).map((item) => (
             <li key={item.id}
               className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
                 item.status === 'active'

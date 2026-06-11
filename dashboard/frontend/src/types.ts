@@ -5,6 +5,7 @@ export interface Recording {
   started_at: string;
   ended_at: string | null;
   status: 'planned' | 'live' | 'ended';
+  agenda_mode: 'apriori' | 'dynamic';
 }
 
 export interface Participant {
@@ -50,6 +51,7 @@ export interface Decision {
   decided_at: string;
   topic_label: string | null;
   segment_id: number | null;
+  archived_at: string | null;
 }
 
 export interface ActionItem {
@@ -59,8 +61,9 @@ export interface ActionItem {
   owner_name: string | null;
   owner_is_user: boolean;
   due_date: string | null;
-  status: 'open' | 'done' | 'overdue';
+  status: 'open' | 'done' | 'overdue' | 'cancelled';
   topic_label: string | null;
+  archived_at: string | null;
 }
 
 export interface KeyMoment {
@@ -70,8 +73,10 @@ export interface KeyMoment {
   quote: string;
   speaker_name: string | null;
   speaker_label: string | null;
+  salience: number;
   flagged_by: 'ai' | 'user';
   ts: string;
+  archived_at: string | null;
 }
 
 export interface PastReference {
@@ -120,11 +125,12 @@ export type WsEvent =
   | { type: 'topic.tagged'; recording_id: string; payload: Record<string, unknown> }
   | { type: 'goal.updated'; recording_id: string; payload: Goal }
   | { type: 'agenda.updated'; recording_id: string; payload: { items: AgendaItem[] } }
-  | { type: 'decision.upserted'; recording_id: string; payload: Decision }
-  | { type: 'action_item.upserted'; recording_id: string; payload: ActionItem }
-  | { type: 'key_moment.created'; recording_id: string; payload: KeyMoment }
+  | { type: 'key_moments.updated'; recording_id: string; payload: { items: KeyMoment[] } }
+  | { type: 'action_items.updated'; recording_id: string; payload: { items: ActionItem[] } }
+  | { type: 'decisions.updated'; recording_id: string; payload: { items: Decision[] } }
   | { type: 'participant.stats'; recording_id: string; payload: { participants: Participant[] } }
   | { type: 'sentiment.updated'; recording_id: string; payload: ToneInfo }
   | { type: 'past_reference.created'; recording_id: string; payload: PastReference }
   | { type: 'recording.status'; recording_id: string; payload: { status: string; ended_at: string | null } }
   | { type: 'header.stats'; recording_id: string; payload: HeaderStats };
+

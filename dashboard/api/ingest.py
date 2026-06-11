@@ -51,8 +51,20 @@ async def ingest_recording(body: RecordingStartRequest, conn: Any = Depends(get_
         )
         row = await cur.fetchone()
         await consume_apriori_setup(conn, row["id"], row["recording_id"], title)
+        await _set_agenda_mode(conn, row["id"])
     await ws_hub.broadcast(body.recording_id, "recording.status", {"status": "live", "ended_at": None})
     return row
+
+
+async def _set_agenda_mode(conn: Any, recording_uuid: str) -> None:
+    """Set agenda_mode='apriori' if the recording has any apriori agenda items, else 'dynamic'."""
+    row = await fetchone(
+        conn,
+        "SELECT 1 FROM agenda_item WHERE recording_id = %s AND source = 'apriori' LIMIT 1",
+        (recording_uuid,),
+    )
+    mode = "apriori" if row else "dynamic"
+    await conn.execute("UPDATE recording SET agenda_mode = %s WHERE id = %s", (mode, recording_uuid))
 
 
 @router.post("/recordings/{recording_id}/segments")
@@ -70,6 +82,7 @@ async def ingest_segment(recording_id: str, body: SegmentRequest, conn: Any = De
     new_row = await cur.fetchone()
     if new_row:
         await consume_apriori_setup(conn, new_row["id"], new_row["recording_id"], new_row["recording_id"])
+        await _set_agenda_mode(conn, new_row["id"])
     recording = await get_recording_row(conn, recording_id)
     cur = await conn.execute(
         """

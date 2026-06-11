@@ -19,12 +19,17 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class AnalysisContext:
     recording: dict[str, Any]
-    segment: dict[str, Any]
+    segments_window: list[dict[str, Any]]       # up to ANALYSIS_WINDOW_SEGMENTS, newest last
+    new_segment_nums: list[int]                 # segment_nums claimed this cycle
     participants: list[dict[str, Any]]
     topics: list[dict[str, Any]]
     goals: list[dict[str, Any]]
     agenda_items: list[dict[str, Any]]
-    recent_segments: list[dict[str, Any]]
+    agenda_mode: str
+    key_moments: list[dict[str, Any]]           # active (archived_at IS NULL)
+    action_items: list[dict[str, Any]]          # non-archived
+    decisions: list[dict[str, Any]]             # non-archived
+    context_summary: str | None                 # rolling summary of earlier segments
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -43,16 +48,14 @@ class AIProvider(Protocol):
 
 def _normalize_result(data: dict[str, Any]) -> AnalysisResult:
     return {
-        "sentiment": clamp_sentiment(data.get("sentiment")) or 0.0,
-        "speaker": data.get("speaker"),
-        "topic_tags": data.get("topic_tags") or [],
-        "add_synonyms": data.get("add_synonyms") or [],
+        "segment_updates": data.get("segment_updates") or [],
+        "key_moments": data.get("key_moments") or [],
+        "action_items": data.get("action_items") or [],
+        "decisions": data.get("decisions") or [],
         "goal_updates": data.get("goal_updates") or [],
         "new_goals": data.get("new_goals") or [],
         "agenda": data.get("agenda"),
-        "decisions": data.get("decisions") or [],
-        "action_items": data.get("action_items") or [],
-        "key_moments": data.get("key_moments") or [],
+        "add_synonyms": data.get("add_synonyms") or [],
     }
 
 

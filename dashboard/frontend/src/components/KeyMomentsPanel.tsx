@@ -16,6 +16,16 @@ function fmtTime(ts: string) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function SalienceBar({ value }: { value: number }) {
+  const pct = Math.round((value ?? 0.5) * 100);
+  const color = pct >= 80 ? 'bg-yellow-400' : pct >= 50 ? 'bg-gray-400' : 'bg-gray-600';
+  return (
+    <div className="w-12 h-1 bg-gray-700 rounded-full overflow-hidden" title={`Salience: ${pct}%`}>
+      <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
 export default function KeyMomentsPanel({ moments, recordingId }: Props) {
   async function flagNow() {
     const quote = prompt('Enter a quote to flag as key moment:');
@@ -27,10 +37,18 @@ export default function KeyMomentsPanel({ moments, recordingId }: Props) {
     });
   }
 
+  // Server guarantees ≤10 and salience-ordered, but sort client-side too for safety
+  const sorted = [...moments].sort((a, b) => (b.salience ?? 0.5) - (a.salience ?? 0.5));
+
   return (
     <section className="bg-gray-900 rounded-xl p-5 h-full flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">⭐ Key Moments</h2>
+        <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">
+          ⭐ Key Moments
+          {sorted.length > 0 && (
+            <span className="ml-2 text-xs font-normal text-gray-500">{sorted.length}/10</span>
+          )}
+        </h2>
         <button
           onClick={flagNow}
           className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1 rounded-full transition"
@@ -38,12 +56,12 @@ export default function KeyMomentsPanel({ moments, recordingId }: Props) {
           + Flag moment
         </button>
       </div>
-      {!moments.length ? (
+      {!sorted.length ? (
         <p className="text-gray-400 text-sm italic">No key moments yet.</p>
       ) : (
         <div className="flex flex-col gap-2">
-          {moments.map((km) => {
-            const cfg = TYPE_CONFIG[km.type];
+          {sorted.map((km) => {
+            const cfg = TYPE_CONFIG[km.type] ?? TYPE_CONFIG.insight;
             return (
               <div key={km.id} className={`rounded-lg px-4 py-3 border ${cfg.cls}`}>
                 <div className="flex items-center gap-2 mb-1">
@@ -52,6 +70,7 @@ export default function KeyMomentsPanel({ moments, recordingId }: Props) {
                   {km.flagged_by === 'user' && (
                     <span className="text-xs text-purple-400 ml-1">Manual</span>
                   )}
+                  <SalienceBar value={km.salience} />
                   <span className="text-xs text-gray-500 ml-auto">{fmtTime(km.ts)}</span>
                 </div>
                 <blockquote className="text-base italic text-gray-100 leading-snug">"{km.quote}"</blockquote>

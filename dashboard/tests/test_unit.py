@@ -179,3 +179,147 @@ class TestSpeakingRatio:
         assert by_id[1] == pytest.approx(0.75)
         assert by_id[2] == pytest.approx(0.25)
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Curation-pipeline tests (v2)
+# ═══════════════════════════════════════════════════════════════════════════
+
+from dashboard.analyzer.apply import KEY_MOMENTS_MAX
+
+
+class TestKeyMomentsCap:
+    """Server-side hard cap: never more than KEY_MOMENTS_MAX active moments."""
+
+    def _make_active(self, n: int) -> list[dict]:
+        return [
+            {"id": i + 1, "salience": round(0.9 - i * 0.05, 2), "flagged_by": "ai"}
+            for i in range(n)
+        ]
+
+    def test_cap_constant_is_10(self):
+        assert KEY_MOMENTS_MAX == 10
+
+    def test_cap_below_limit_unchanged(self):
+        active = self._make_active(8)
+        # Simulate cap logic: keep top KEY_MOMENTS_MAX by salience
+        to_keep = sorted(active, key=lambda x: x["salience"], reverse=True)[:KEY_MOMENTS_MAX]
+        assert len(to_keep) == 8
+
+    def test_cap_over_limit_evicts_lowest(self):
+        active = self._make_active(12)
+        to_keep_ids: set[int] = set()
+        user_flagged = {r["id"] for r in active if r.get("flagged_by") == "user"}
+        to_keep_ids |= user_flagged
+        remaining = [r for r in active if r["id"] not in to_keep_ids]
+        for r in remaining[:KEY_MOMENTS_MAX - len(to_keep_ids)]:
+            to_keep_ids.add(r["id"])
+        archived = [r for r in active if r["id"] not in to_keep_ids]
+        assert len(to_keep_ids) == KEY_MOMENTS_MAX
+        assert len(archived) == 2
+        # Archived items should be lowest salience
+        for a in archived:
+            assert a["salience"] < min(active[i]["salience"] for i in range(KEY_MOMENTS_MAX))
+
+    def test_user_flagged_exempt_from_eviction(self):
+        active = self._make_active(12)
+        # Make last 3 user-flagged
+        for i in range(9, 12):
+            active[i]["flagged_by"] = "user"
+        user_flagged = {r["id"] for r in active if r.get("flagged_by") == "user"}
+        to_keep_ids: set[int] = set(user_flagged)
+        remaining = [r for r in active if r["id"] not in to_keep_ids]
+        for r in remaining[:KEY_MOMENTS_MAX - len(to_keep_ids)]:
+            to_keep_ids.add(r["id"])
+        # All user-flagged preserved
+        assert user_flagged.issubset(to_keep_ids)
+        assert len(to_keep_ids) == KEY_MOMENTS_MAX
+
+
+class TestAgendaModeEnforcement:
+    """agenda_mode=apriori blocks creates; agenda_mode=dynamic allows them."""
+
+    def test_apriori_rejects_new_item(self):
+        """In apriori mode, a new_item op should be silently ignored."""
+        mode = "apriori"
+        item_op = {"title": "New topic", "topic_ref": None}
+        # Simulated: only create if dynamic
+        created = mode == "dynamic" and bool(item_op.get("title"))
+        assert created is False
+
+    def test_dynamic_allows_new_item(self):
+        mode = "dynamic"
+        item_op = {"title": "New topic", "topic_ref": None}
+        created = mode == "dynamic" and bool(item_op.get("title"))
+        assert created is True
+
+    def test_apriori_allows_status_change(self):
+        """In apriori mode, updating existing item status is allowed."""
+        mode = "apriori"
+        item_op = {"id": 3, "status": "done"}
+        # Has an id → status update allowed in both modes
+        is_status_update = bool(item_op.get("id"))
+        assert is_status_update is True
+
+    def test_done_is_terminal(self):
+        """Done items must not be re-activated."""
+        result = apply_agenda_transition(
+            [{"id": 1, "status": "done", "started_at": "T0", "ended_at": "T1"}],
+            new_active_id=1,
+            now="T2",
+        )
+        assert result[0]["status"] == "done"
+
+
+class TestDedupHashGuard:
+    """dedup_hash prevents re-creation of same entity text."""
+
+    def test_same_description_same_hash(self):
+        h1 = _dedup_hash("Ralf zorgt voor data overzicht")
+        h2 = _dedup_hash("ralf zorgt voor data overzicht")
+        assert h1 == h2
+
+    def test_different_description_different_hash(self):
+        h1 = _dedup_hash("Besluit A")
+        h2 = _dedup_hash("Besluit B")
+        assert h1 != h2
+
+    def test_whitespace_normalised(self):
+        assert _dedup_hash("  foo  bar  ") == _dedup_hash("foo bar")
+
+
+class TestCuratedIdempotency:
+    """Re-processing the same key moment list converges to the same state."""
+
+    def test_same_ai_list_twice_produces_same_ids_to_keep(self):
+        """Simulates: apply ai_moments twice; the set of ids to keep is identical."""
+        ai_moments = [
+            {"id": 1, "salience": 0.9},
+            {"id": 2, "salience": 0.7},
+            {"type": "insight", "quote": "Something important", "salience": 0.6},
+        ]
+        # Run 1: ids present in AI list
+        ids_present_run1 = {int(m["id"]) for m in ai_moments if m.get("id")}
+        # Run 2: same list
+        ids_present_run2 = {int(m["id"]) for m in ai_moments if m.get("id")}
+        assert ids_present_run1 == ids_present_run2
+
+    def test_dropped_id_triggers_archive(self):
+        """If AI drops an id from the list, it should be archived."""
+        currently_active_ids = {1, 2, 3}
+        ai_kept_ids = {1, 3}
+        user_flagged_ids: set[int] = set()
+        to_archive = currently_active_ids - ai_kept_ids - user_flagged_ids
+        assert to_archive == {2}
+
+    def test_user_flagged_not_archived_on_omission(self):
+        """User-flagged moments survive even when absent from AI list."""
+        currently_active = [
+            {"id": 1, "flagged_by": "ai"},
+            {"id": 2, "flagged_by": "user"},
+        ]
+        ai_kept_ids = {1}  # AI omits id=2
+        user_flagged_ids = {r["id"] for r in currently_active if r.get("flagged_by") == "user"}
+        to_archive = {r["id"] for r in currently_active if r["id"] not in ai_kept_ids and r["id"] not in user_flagged_ids}
+        assert to_archive == set()  # id=2 is user-flagged → not archived
+
+

@@ -51,7 +51,7 @@ export default function LivePage() {
       <main className="flex-1 p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 auto-rows-min">
         {/* Row 1: Goals, Agenda, Speaking+Tone */}
         <GoalsPanel goals={goals} />
-        <AgendaPanel items={agenda_items} />
+        <AgendaPanel items={agenda_items} agendaMode={recording.agenda_mode} />
         <SpeakingTonePanel participants={participants} tone={tone} />
 
         {/* Row 2: Actions, Decisions, Key Moments */}

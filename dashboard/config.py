@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     voice_capture_dashboard_url: str = Field(
         "http://localhost:8100", alias="VOICE_CAPTURE_DASHBOARD_URL"
     )
+    analysis_window_segments: int = Field(25, alias="ANALYSIS_WINDOW_SEGMENTS")
+    key_moments_max: int = Field(10, alias="KEY_MOMENTS_MAX")
+    summary_lag_segments: int = Field(10, alias="SUMMARY_LAG_SEGMENTS")
+    summary_max_words: int = Field(250, alias="SUMMARY_MAX_WORDS")
 
 
 @lru_cache(maxsize=1)

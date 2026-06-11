@@ -7,8 +7,8 @@ function initials(name: string) {
 }
 
 export default function ActionItemsPanel({ items }: Props) {
-  const open = items.filter((i) => i.status !== 'done');
-  const done = items.filter((i) => i.status === 'done');
+  const open = items.filter((i) => i.status !== 'done' && i.status !== 'cancelled');
+  const done = items.filter((i) => i.status === 'done' || i.status === 'cancelled');
   const sorted = [...open, ...done];
 
   return (
@@ -21,12 +21,12 @@ export default function ActionItemsPanel({ items }: Props) {
           {sorted.map((item) => (
             <div key={item.id}
               className={`rounded-lg px-4 py-3 border transition-all ${
-                item.owner_is_user
+                item.status === 'done' || item.status === 'cancelled'
+                  ? 'border-gray-700 bg-gray-800/20 opacity-60'
+                  : item.owner_is_user
                   ? 'border-amber-500 bg-amber-950/30'
                   : item.status === 'overdue'
                   ? 'border-red-700 bg-red-950/20'
-                  : item.status === 'done'
-                  ? 'border-gray-700 bg-gray-800/20 opacity-60'
                   : 'border-gray-700 bg-gray-800/50'
               }`}
             >
@@ -46,9 +46,11 @@ export default function ActionItemsPanel({ items }: Props) {
                   </span>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-base text-gray-100 leading-snug">{item.description}</p>
+                  <p className={`text-base text-gray-100 leading-snug ${item.status === 'done' ? 'line-through text-gray-400' : ''}`}>
+                    {item.description}
+                  </p>
                   <div className="flex flex-wrap items-center gap-2 mt-1">
-                    {item.owner_is_user && (
+                    {item.owner_is_user && item.status !== 'done' && (
                       <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-semibold">You</span>
                     )}
                     {!item.owner_name && (
@@ -58,9 +60,12 @@ export default function ActionItemsPanel({ items }: Props) {
                       <span className="text-xs bg-red-700 text-white px-2 py-0.5 rounded-full">Overdue</span>
                     )}
                     {item.status === 'done' && (
-                      <span className="text-xs bg-green-700 text-white px-2 py-0.5 rounded-full">Done</span>
+                      <span className="text-xs bg-green-700 text-white px-2 py-0.5 rounded-full">✓ Done</span>
                     )}
-                    {item.due_date && (
+                    {item.status === 'cancelled' && (
+                      <span className="text-xs bg-gray-600 text-white px-2 py-0.5 rounded-full">Cancelled</span>
+                    )}
+                    {item.due_date && item.status !== 'done' && (
                       <span className="text-xs text-gray-400">Due: {item.due_date}</span>
                     )}
                     {item.topic_label && (

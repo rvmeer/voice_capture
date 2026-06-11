@@ -57,7 +57,7 @@ async def recording_snapshot(recording_id: str, conn: Any = Depends(get_db_conne
         SELECT d.*, t.label AS topic_label
         FROM decision d
         LEFT JOIN topic t ON t.id = d.topic_id
-        WHERE d.recording_id = %s
+        WHERE d.recording_id = %s AND d.archived_at IS NULL
         ORDER BY d.decided_at DESC, d.id DESC
         """,
         (recording["id"],),
@@ -70,7 +70,7 @@ async def recording_snapshot(recording_id: str, conn: Any = Depends(get_db_conne
             FROM action_item a
             LEFT JOIN topic t ON t.id = a.topic_id
             LEFT JOIN participant p ON p.id = a.owner_participant_id
-            WHERE a.recording_id = %s
+            WHERE a.recording_id = %s AND a.archived_at IS NULL
             ORDER BY a.id DESC
             """,
             (recording["id"],),
@@ -82,8 +82,9 @@ async def recording_snapshot(recording_id: str, conn: Any = Depends(get_db_conne
         SELECT km.*, p.name AS speaker_name
         FROM key_moment km
         LEFT JOIN participant p ON p.id = km.speaker_participant_id
-        WHERE km.recording_id = %s
-        ORDER BY km.ts DESC, km.id DESC
+        WHERE km.recording_id = %s AND km.archived_at IS NULL
+        ORDER BY km.salience DESC, km.ts DESC
+        LIMIT 10
         """,
         (recording["id"],),
     )
