@@ -60,17 +60,17 @@ class AnalyzerWorker:
         topics = await fetchall(
             conn,
             """
-            SELECT t.* FROM topic t
-            WHERE EXISTS (
-                SELECT 1 FROM recording_topic rt WHERE rt.topic_id = t.id AND rt.recording_id = %s
+            WITH linked AS (
+                SELECT topic_id AS id FROM recording_topic WHERE recording_id = %s
+            ),
+            top20 AS (
+                SELECT id FROM topic ORDER BY occurrence_count DESC LIMIT 20
+            ),
+            combined AS (
+                SELECT id FROM linked UNION SELECT id FROM top20
             )
-            UNION
-            (
-                SELECT t2.* FROM topic t2
-                ORDER BY t2.occurrence_count DESC
-                LIMIT 20
-            )
-            ORDER BY occurrence_count DESC, lower(label)
+            SELECT t.* FROM topic t JOIN combined c ON t.id = c.id
+            ORDER BY t.occurrence_count DESC, lower(t.label)
             """,
             (recording["id"],),
         )
