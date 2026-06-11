@@ -3,11 +3,32 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
+
+import httpx
 
 from dashboard.db import fetchall, fetchone
 
 logger = logging.getLogger(__name__)
+
+_VC_INTERNAL_URL = os.environ.get("VC_INTERNAL_API_URL", "http://127.0.0.1:5151")
+
+
+async def _qdrant_snippets(topic_label: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    """Query Qdrant via the Voice Capture internal proxy (avoids embedded-storage lock)."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{_VC_INTERNAL_URL}/qdrant/search",
+                json={"query": topic_label, "limit": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("results") or []
+    except Exception as exc:
+        logger.debug("Qdrant proxy lookup failed for topic %r: %s", topic_label, exc)
+        return []
 
 
 def _build_summary(source: dict[str, Any], snippets: list[dict[str, Any]]) -> tuple[str, str]:
@@ -28,16 +49,6 @@ def _build_summary(source: dict[str, Any], snippets: list[dict[str, Any]]) -> tu
     summary = " | ".join(part for part in summary_bits if part).strip()
     return signal, summary[:500] if summary else ""
 
-
-def _qdrant_snippets(topic_label: str, *, limit: int = 5) -> list[dict[str, Any]]:
-    try:
-        from qdrant import QdrantIndexer
-
-        indexer = QdrantIndexer()
-        return indexer.search(topic_label, limit=limit)
-    except Exception as exc:
-        logger.warning("Qdrant lookup failed for topic %s: %s", topic_label, exc)
-        return []
 
 
 async def auto_check(conn: Any, ws_hub: Any, recording_id: str, topic_id: int) -> list[dict[str, Any]]:
@@ -68,7 +79,7 @@ async def auto_check(conn: Any, ws_hub: Any, recording_id: str, topic_id: int) -
         """,
         (topic_id, recording_id),
     )
-    snippets = _qdrant_snippets(topic["label"])
+    snippets = await _qdrant_snippets(topic["label"])
     created: list[dict[str, Any]] = []
     for source in sources[:3]:
         source_snippets = [s for s in snippets if s.get("recording_id") == source.get("source_vc_recording_id")]
@@ -97,7 +108,7 @@ async def dig_deeper(conn: Any, ws_hub: Any, recording_id: str, topic_id: int) -
     topic = await fetchone(conn, "SELECT id, label FROM topic WHERE id = %s", (topic_id,))
     if not current_recording or not topic:
         return []
-    snippets = _qdrant_snippets(topic["label"], limit=8)
+    snippets = await _qdrant_snippets(topic["label"], limit=8)
     created: list[dict[str, Any]] = []
     for snippet in snippets[:3]:
         source = await fetchone(

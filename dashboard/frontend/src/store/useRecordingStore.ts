@@ -78,7 +78,7 @@ export const useRecordingStore = create<RecordingStore>((set, get) => ({
         break;
       }
       case 'participant.stats': {
-        const participants = (event.payload as { participants: Participant[] }).participants;
+        const participants = ((event.payload as { participants?: Participant[] }).participants ?? []);
         set({ snapshot: { ...s, participants } });
         break;
       }

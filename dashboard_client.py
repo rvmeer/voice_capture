@@ -22,6 +22,8 @@ class DashboardClient:
         self._queue: queue.Queue[tuple[str, dict]] = queue.Queue()
         self._thread = threading.Thread(target=self._worker, daemon=True, name="dashboard-client")
         self._thread.start()
+        # Drain any previously spooled events in background
+        threading.Thread(target=self._drain_spool, daemon=True, name="dashboard-spool-drain").start()
 
     def recording_started(self, recording_id: str, title: str | None, started_at: datetime) -> None:
         self._queue.put(
@@ -93,6 +95,38 @@ class DashboardClient:
                     self._spool(url, payload)
                     return
                 time.sleep(0.5 * (2**attempt))
+
+    def _drain_spool(self) -> None:
+        """On startup, replay any events that were spooled during a previous service outage."""
+        spool_path = Path.home() / ".voice_capture_dashboard_spool.jsonl"
+        if not spool_path.exists():
+            return
+        time.sleep(3)  # Give the service a moment to start
+        lines_to_retry: list[str] = []
+        try:
+            with spool_path.open("r", encoding="utf-8") as handle:
+                lines_to_retry = [line.strip() for line in handle if line.strip()]
+            spool_path.unlink()
+        except Exception as exc:
+            logger.warning("Dashboard spool read failed: %s", exc)
+            return
+        failed: list[str] = []
+        for line in lines_to_retry:
+            try:
+                entry = json.loads(line)
+                self._post_with_retry(entry["url"], entry["payload"])
+            except Exception as exc:
+                logger.warning("Spool replay failed: %s", exc)
+                failed.append(line)
+        if failed:
+            try:
+                with spool_path.open("a", encoding="utf-8") as handle:
+                    for line in failed:
+                        handle.write(line + "\n")
+            except Exception as exc:
+                logger.warning("Dashboard spool re-write failed: %s", exc)
+        elif lines_to_retry:
+            logger.info("Dashboard: drained %d spooled events", len(lines_to_retry))
 
     def _spool(self, url: str, payload: dict) -> None:
         spool_path = Path.home() / ".voice_capture_dashboard_spool.jsonl"

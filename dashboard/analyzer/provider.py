@@ -60,16 +60,21 @@ class ClaudeProvider:
     def __init__(self, api_key: str | None, model: str) -> None:
         self.api_key = api_key
         self.model = model
+        self._client: Any = None
 
-    async def analyze(self, context: AnalysisContext) -> AnalysisResult:
+    def _get_client(self) -> Any:
         if not self.api_key:
             raise RuntimeError("Anthropic API key not configured")
-        try:
-            from anthropic import AsyncAnthropic
-        except Exception as exc:
-            raise RuntimeError("anthropic package not available") from exc
+        if self._client is None:
+            try:
+                from anthropic import AsyncAnthropic
+            except Exception as exc:
+                raise RuntimeError("anthropic package not available") from exc
+            self._client = AsyncAnthropic(api_key=self.api_key)
+        return self._client
 
-        client = AsyncAnthropic(api_key=self.api_key)
+    async def analyze(self, context: AnalysisContext) -> AnalysisResult:
+        client = self._get_client()
         response = await client.messages.create(
             model=self.model,
             max_tokens=2000,
@@ -111,14 +116,20 @@ class OllamaProvider:
 
 
 def _should_fallback(exc: Exception) -> bool:
-    name = exc.__class__.__name__
     if isinstance(exc, RuntimeError) and "Anthropic API key not configured" in str(exc):
         return True
+    name = exc.__class__.__name__
+    # Fall back on any Anthropic connection/auth/rate/server error
     return name in {
         "APIConnectionError",
+        "APITimeoutError",
         "AuthenticationError",
         "PermissionDeniedError",
         "RateLimitError",
+        "InternalServerError",
+        "OverloadedError",
+        "APIStatusError",
+        "APIError",
     }
 
 

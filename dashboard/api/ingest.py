@@ -57,6 +57,15 @@ async def ingest_recording(body: RecordingStartRequest, conn: Any = Depends(get_
 
 @router.post("/recordings/{recording_id}/segments")
 async def ingest_segment(recording_id: str, body: SegmentRequest, conn: Any = Depends(get_db_connection)) -> dict[str, Any]:
+    # Auto-create recording row if missing (self-healing when recording_started was lost/spooled)
+    await conn.execute(
+        """
+        INSERT INTO recording (recording_id, title, started_at, status)
+        VALUES (%s, %s, %s, 'live')
+        ON CONFLICT (recording_id) DO NOTHING
+        """,
+        (recording_id, recording_id, body.ts),
+    )
     recording = await get_recording_row(conn, recording_id)
     cur = await conn.execute(
         """

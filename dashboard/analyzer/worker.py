@@ -57,7 +57,23 @@ class AnalyzerWorker:
             """,
             (recording["recording_id"],),
         )
-        topics = await fetchall(conn, "SELECT * FROM topic ORDER BY occurrence_count DESC, lower(label)")
+        topics = await fetchall(
+            conn,
+            """
+            SELECT t.* FROM topic t
+            WHERE EXISTS (
+                SELECT 1 FROM recording_topic rt WHERE rt.topic_id = t.id AND rt.recording_id = %s
+            )
+            UNION
+            (
+                SELECT t2.* FROM topic t2
+                ORDER BY t2.occurrence_count DESC
+                LIMIT 20
+            )
+            ORDER BY occurrence_count DESC, lower(label)
+            """,
+            (recording["id"],),
+        )
         goals = await fetchall(conn, "SELECT * FROM goal WHERE recording_id = %s ORDER BY created_at", (recording["id"],))
         agenda_items = await fetchall(conn, "SELECT * FROM agenda_item WHERE recording_id = %s ORDER BY position", (recording["id"],))
         recent_segments = await fetchall(
@@ -101,11 +117,36 @@ class AnalyzerWorker:
         if next_status == "pending":
             await asyncio.sleep(min(2**attempts, 8))
 
+    async def _reap_stuck_segments(self, conn: Any) -> None:
+        """Reset segments stuck in 'processing' for > 3 minutes back to 'pending'."""
+        await conn.execute(
+            """
+            UPDATE segment
+            SET ai_status = 'pending',
+                ai_attempts = LEAST(ai_attempts + 1, 2)
+            WHERE ai_status = 'processing'
+              AND (ai_processed_at IS NULL OR ai_processed_at < now() - interval '3 minutes')
+            """,
+        )
+        await conn.commit()
+
     async def run(self) -> None:
         pool = get_pool()
+        # On startup, reap any segments left in 'processing' from a previous crash
+        try:
+            async with pool.connection() as conn:
+                await self._reap_stuck_segments(conn)
+        except Exception as exc:
+            logger.warning("Startup reap failed: %s", exc)
+        reap_counter = 0
         while not self._stop.is_set():
             try:
                 async with pool.connection() as conn:
+                    # Periodically reap stuck segments (every ~5 minutes)
+                    reap_counter += 1
+                    if reap_counter >= 300:
+                        reap_counter = 0
+                        await self._reap_stuck_segments(conn)
                     segment = await self._claim_next_segment(conn)
                     if not segment:
                         await asyncio.sleep(1.0)

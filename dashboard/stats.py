@@ -11,10 +11,10 @@ def tone_window(sentiments: list[float | None]) -> dict[str, float | str]:
     if not values:
         return {"window_avg": 0.0, "label": "neutral"}
     window_avg = round(sum(values) / len(values), 3)
-    if window_avg >= 0.25:
-        label = "positive"
-    elif window_avg <= -0.25:
-        label = "negative"
+    if window_avg > 0.15:
+        label = "constructive"
+    elif window_avg < -0.15:
+        label = "tense"
     else:
         label = "neutral"
     return {"window_avg": window_avg, "label": label}

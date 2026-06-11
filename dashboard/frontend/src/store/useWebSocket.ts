@@ -19,7 +19,8 @@ export function useWebSocket(recordingId: string | undefined) {
 
     function connect() {
       if (unmountedRef.current) return;
-      const wsUrl = `ws://${window.location.hostname}:8100/ws/${recordingId}`;
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${proto}//${window.location.host}/ws/${recordingId}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
