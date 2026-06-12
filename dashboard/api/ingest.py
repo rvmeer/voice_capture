@@ -140,3 +140,39 @@ async def end_recording(recording_id: str, body: RecordingEndRequest, conn: Any 
     await ws_hub.broadcast(recording["recording_id"], "agenda.updated", {"items": agenda_rows})
     await ws_hub.broadcast(recording["recording_id"], "recording.status", {"status": "ended", "ended_at": body.ended_at})
     return row
+
+
+class RecordingTitleRequest(BaseModel):
+    title: str
+
+
+@router.patch("/recordings/{recording_id}/title")
+async def update_recording_title(
+    recording_id: str, body: RecordingTitleRequest, conn: Any = Depends(get_db_connection)
+) -> dict[str, Any]:
+    """Update the recording title in PostgreSQL and (async) Qdrant."""
+    recording = await get_recording_row(conn, recording_id)
+    cur = await conn.execute(
+        "UPDATE recording SET title = %s WHERE id = %s RETURNING id, recording_id, title",
+        (body.title, recording["id"]),
+    )
+    row = await cur.fetchone()
+    await conn.commit()
+    await ws_hub.broadcast(recording["recording_id"], "recording.title", {"title": body.title})
+
+    # Update Qdrant in a background thread (non-blocking, best-effort)
+    import asyncio, threading
+
+    def _update_qdrant() -> None:
+        try:
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+            from qdrant import QdrantIndexer
+            QdrantIndexer().update_recording_name(recording_id, body.title)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Qdrant title update failed for %s: %s", recording_id, exc)
+
+    threading.Thread(target=_update_qdrant, daemon=True, name="qdrant-title-update").start()
+    return row

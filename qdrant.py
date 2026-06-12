@@ -256,7 +256,19 @@ class QdrantIndexer:
             ),
         )
 
-    # ---------- indexing ----------
+    def update_recording_name(self, recording_id: str, name: str) -> None:
+        """Update the recording_name payload field for all points of a recording."""
+        client = self._client_instance()
+        *_, Filter, FieldCondition, MatchValue = self._require_qdrant()
+
+        client.set_payload(
+            collection_name=self.collection_name,
+            payload={"recording_name": name},
+            points=Filter(
+                must=[FieldCondition(key="recording_id", match=MatchValue(value=recording_id))]
+            ),
+        )
+
 
     def index_live_segment(
         self,

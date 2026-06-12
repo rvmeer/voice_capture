@@ -909,6 +909,22 @@ class VoiceCapture(QObject):
         """Save the Ollama-generated title to the recording JSON (main thread)."""
         self.recording_manager.update_recording(recording_id, name=title)
         logger.info(f"Ollama: titel opgeslagen voor {recording_id}: '{title}'")
+        # Push title to dashboard (PostgreSQL) via API
+        if self.dashboard_client:
+            try:
+                self.dashboard_client.recording_title_updated(recording_id, title)
+            except Exception as e:
+                logger.warning(f"Dashboard: titel update mislukt voor {recording_id}: {e}")
+        # Update Qdrant directly (same process = no lock conflict)
+        def _update_qdrant():
+            try:
+                from qdrant import QdrantIndexer
+                QdrantIndexer().update_recording_name(recording_id, title)
+                logger.info(f"Qdrant: recording_name bijgewerkt voor {recording_id}")
+            except Exception as e:
+                logger.warning(f"Qdrant: titel update mislukt voor {recording_id}: {e}")
+        import threading as _threading
+        _threading.Thread(target=_update_qdrant, daemon=True, name="qdrant-title").start()
         if hasattr(self, 'tray_icon'):
             self.tray_icon.showMessage(
                 "Titel Bepaald",

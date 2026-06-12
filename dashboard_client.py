@@ -19,7 +19,7 @@ class DashboardClient:
         import os
 
         self.base_url = os.environ.get("VOICE_CAPTURE_DASHBOARD_URL", "http://localhost:8100").rstrip("/")
-        self._queue: queue.Queue[tuple[str, dict]] = queue.Queue()
+        self._queue: queue.Queue[tuple[str, dict, str]] = queue.Queue()
         self._thread = threading.Thread(target=self._worker, daemon=True, name="dashboard-client")
         self._thread.start()
         # Drain any previously spooled events in background
@@ -34,6 +34,7 @@ class DashboardClient:
                     "title": title,
                     "started_at": started_at.isoformat(),
                 },
+                "POST",
             )
         )
 
@@ -55,6 +56,7 @@ class DashboardClient:
                     "speaker_label": None,
                     "duration_seconds": duration_seconds,
                 },
+                "POST",
             )
         )
 
@@ -63,20 +65,31 @@ class DashboardClient:
             (
                 f"{self.base_url}/ingest/recordings/{parse.quote(recording_id, safe='')}/end",
                 {"ended_at": ended_at.isoformat()},
+                "POST",
+            )
+        )
+
+    def recording_title_updated(self, recording_id: str, title: str) -> None:
+        """Push Ollama-generated title to the dashboard (updates PostgreSQL + Qdrant)."""
+        self._queue.put(
+            (
+                f"{self.base_url}/ingest/recordings/{parse.quote(recording_id, safe='')}/title",
+                {"title": title},
+                "PATCH",
             )
         )
 
     def _worker(self) -> None:
         while True:
-            url, payload = self._queue.get()
+            url, payload, method = self._queue.get()
             try:
-                self._post_with_retry(url, payload)
+                self._post_with_retry(url, payload, method=method)
             except Exception as exc:
                 logger.warning("Dashboard client worker error: %s", exc)
             finally:
                 self._queue.task_done()
 
-    def _post_with_retry(self, url: str, payload: dict) -> None:
+    def _post_with_retry(self, url: str, payload: dict, method: str = "POST") -> None:
         data = json.dumps(payload).encode("utf-8")
         for attempt in range(3):
             try:
@@ -84,7 +97,7 @@ class DashboardClient:
                     url,
                     data=data,
                     headers={"Content-Type": "application/json"},
-                    method="POST",
+                    method=method,
                 )
                 with request.urlopen(req, timeout=2) as response:
                     response.read()
@@ -92,7 +105,7 @@ class DashboardClient:
             except Exception as exc:
                 logger.warning("Dashboard request failed (%s, attempt %s/3): %s", url, attempt + 1, exc)
                 if attempt == 2:
-                    self._spool(url, payload)
+                    self._spool(url, payload, method=method)
                     return
                 time.sleep(0.5 * (2**attempt))
 
@@ -114,7 +127,7 @@ class DashboardClient:
         for line in lines_to_retry:
             try:
                 entry = json.loads(line)
-                self._post_with_retry(entry["url"], entry["payload"])
+                self._post_with_retry(entry["url"], entry["payload"], method=entry.get("method", "POST"))
             except Exception as exc:
                 logger.warning("Spool replay failed: %s", exc)
                 failed.append(line)
@@ -128,10 +141,10 @@ class DashboardClient:
         elif lines_to_retry:
             logger.info("Dashboard: drained %d spooled events", len(lines_to_retry))
 
-    def _spool(self, url: str, payload: dict) -> None:
+    def _spool(self, url: str, payload: dict, method: str = "POST") -> None:
         spool_path = Path.home() / ".voice_capture_dashboard_spool.jsonl"
         try:
             with spool_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps({"url": url, "payload": payload}, ensure_ascii=False) + "\n")
+                handle.write(json.dumps({"url": url, "payload": payload, "method": method}, ensure_ascii=False) + "\n")
         except Exception as exc:
             logger.warning("Dashboard spool write failed: %s", exc)
