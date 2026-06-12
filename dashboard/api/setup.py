@@ -622,7 +622,20 @@ async def create_key_moment(recording_id: str, body: KeyMomentCreate, conn: Any 
     )
     row = await cur.fetchone()
     await conn.commit()
-    await ws_hub.broadcast(recording["recording_id"], "key_moment.created", row)
+    # Broadcast full list so frontend replaces in-place (key_moment.created is retired)
+    all_moments = await fetchall(
+        conn,
+        """
+        SELECT km.*, p.name AS speaker_name
+        FROM key_moment km
+        LEFT JOIN participant p ON p.id = km.speaker_participant_id
+        WHERE km.recording_id = %s AND km.archived_at IS NULL
+        ORDER BY km.salience DESC NULLS LAST, km.ts DESC
+        LIMIT 10
+        """,
+        (recording["id"],),
+    )
+    await ws_hub.broadcast(recording["recording_id"], "key_moments.updated", {"items": all_moments})
     return row
 
 
