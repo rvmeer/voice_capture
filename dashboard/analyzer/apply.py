@@ -626,7 +626,7 @@ async def apply_curated_result(
                         )
                 except Exception as exc:
                     logger.warning("action_item reconcile failed: %s", exc)
-            active_actions = await fetchall(conn, "SELECT ai.*, p.name AS owner_name FROM action_item ai LEFT JOIN participant p ON p.id = ai.owner_participant_id WHERE ai.recording_id = %s AND ai.archived_at IS NULL ORDER BY ai.created_at", (recording_uuid,))
+            active_actions = await fetchall(conn, "SELECT ai.*, p.name AS owner_name FROM action_item ai LEFT JOIN participant p ON p.id = ai.owner_participant_id WHERE ai.recording_id = %s AND ai.archived_at IS NULL ORDER BY ai.id", (recording_uuid,))
             events.append(("action_items.updated", {"items": active_actions}))
         except Exception as exc:
             logger.warning("action_items reconcile failed: %s", exc)
@@ -721,16 +721,26 @@ async def apply_curated_result(
                     )
                 for item_op in agenda_payload.get("items") or []:
                     try:
-                        if item_op.get("id"):
+                        item_id = item_op.get("id")
+                        if item_id:
+                            # Verify this ID actually exists for this recording
+                            existing = await fetchone(
+                                conn,
+                                "SELECT id FROM agenda_item WHERE id = %s AND recording_id = %s",
+                                (item_id, recording_uuid),
+                            )
+                        else:
+                            existing = None
+                        if item_id and existing:
                             # Status change — allowed in both modes
                             new_status = item_op.get("status")
                             if new_status and new_status != "active":  # active handled above
                                 await conn.execute(
                                     "UPDATE agenda_item SET status = %s WHERE id = %s AND recording_id = %s AND status <> 'done'",
-                                    (new_status, item_op["id"], recording_uuid),
+                                    (new_status, item_id, recording_uuid),
                                 )
                         elif agenda_mode == "dynamic" and item_op.get("title"):
-                            # Create new item — only in dynamic mode
+                            # Create new item (also handles AI hallucinating a non-existent id)
                             topic = await resolve_topic_ref(conn, item_op.get("topic_ref"), create=True)
                             next_pos = await fetchone(conn, "SELECT COALESCE(MAX(position), 0) + 1 AS p FROM agenda_item WHERE recording_id = %s", (recording_uuid,))
                             await conn.execute(
@@ -741,7 +751,7 @@ async def apply_curated_result(
                                 "UPDATE agenda_item SET status = 'done', ended_at = COALESCE(ended_at, now()) WHERE recording_id = %s AND status = 'active' AND id < (SELECT MAX(id) FROM agenda_item WHERE recording_id = %s)",
                                 (recording_uuid, recording_uuid),
                             )
-                        elif agenda_mode == "apriori" and not item_op.get("id"):
+                        elif agenda_mode == "apriori" and not (item_id and existing):
                             logger.debug("Ignored AI agenda create in apriori mode: %s", item_op.get("title"))
                     except Exception as exc:
                         logger.warning("agenda item_op failed: %s", exc)

@@ -138,7 +138,7 @@ class AnalyzerWorker:
         )
         action_items = await fetchall(
             conn,
-            "SELECT ai.*, p.name AS owner_name FROM action_item ai LEFT JOIN participant p ON p.id = ai.owner_participant_id WHERE ai.recording_id = %s AND ai.archived_at IS NULL ORDER BY ai.created_at",
+            "SELECT ai.*, p.name AS owner_name FROM action_item ai LEFT JOIN participant p ON p.id = ai.owner_participant_id WHERE ai.recording_id = %s AND ai.archived_at IS NULL ORDER BY ai.id",
             (recording["id"],),
         )
         decisions = await fetchall(
@@ -220,9 +220,23 @@ class AnalyzerWorker:
                     if not segments:
                         await asyncio.sleep(1.0)
                         continue
+                    logger.info(
+                        "Worker: claiming %d segments for %s",
+                        len(segments),
+                        recording.get("recording_id"),
+                    )
                     context = await self._build_context(conn, segments, recording)
                     try:
                         result = await self.provider.analyze(context)
+                        agenda = result.get("agenda")
+                        logger.info(
+                            "Worker: AI returned agenda=%s  key_moments=%d  action_items=%d",
+                            "null" if agenda is None else f"items={len((agenda or {}).get('items') or [])}",
+                            len(result.get("key_moments") or []),
+                            len(result.get("action_items") or []),
+                        )
+                        if agenda and isinstance(agenda, dict):
+                            logger.info("Worker: agenda items detail: %s", agenda.get("items"))
                         await apply_curated_result(
                             conn,
                             recording_uuid=recording["id"],

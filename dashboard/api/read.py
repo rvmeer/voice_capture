@@ -129,7 +129,7 @@ async def list_recordings(
         return await fetchall(
             conn,
             """
-            SELECT id, recording_id, title, started_at, ended_at, status
+            SELECT id, recording_id, title, started_at, ended_at, status, agenda_mode
             FROM recording
             WHERE status = %s
             ORDER BY started_at DESC NULLS LAST, recording_id DESC
@@ -139,7 +139,7 @@ async def list_recordings(
     return await fetchall(
         conn,
         """
-        SELECT id, recording_id, title, started_at, ended_at, status
+        SELECT id, recording_id, title, started_at, ended_at, status, agenda_mode
         FROM recording
         ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END,
                  started_at DESC NULLS LAST,

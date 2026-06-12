@@ -39,7 +39,7 @@ async def get_recording_row(conn: Any, recording_id: str) -> dict[str, Any]:
     row = await fetchone(
         conn,
         """
-        SELECT id, recording_id, title, started_at, ended_at, status
+        SELECT id, recording_id, title, started_at, ended_at, status, agenda_mode
         FROM recording
         WHERE recording_id = %s OR id::text = %s
         """,
