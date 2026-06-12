@@ -59,8 +59,12 @@ def delete_from_qdrant(recording_id: str) -> bool:
 
 
 def delete_from_db(conn: psycopg.Connection, recording_uuid: str) -> None:
-    """Delete a recording from PostgreSQL (cascades to all child tables)."""
+    """Delete a recording from PostgreSQL (cascades to all child tables).
+    Also removes past_reference rows where this recording is the source
+    (that FK has no CASCADE)."""
     with conn.cursor() as cur:
+        # Remove cross-recording references where this is the source
+        cur.execute("DELETE FROM past_reference WHERE source_recording_id = %s", (recording_uuid,))
         cur.execute("DELETE FROM recording WHERE id = %s", (recording_uuid,))
     conn.commit()
 
