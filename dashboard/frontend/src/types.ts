@@ -132,5 +132,6 @@ export type WsEvent =
   | { type: 'sentiment.updated'; recording_id: string; payload: ToneInfo }
   | { type: 'past_reference.created'; recording_id: string; payload: PastReference }
   | { type: 'recording.status'; recording_id: string; payload: { status: string; ended_at: string | null } }
+  | { type: 'recording.title'; recording_id: string; payload: { title: string } }
   | { type: 'header.stats'; recording_id: string; payload: HeaderStats };
 

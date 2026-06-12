@@ -92,6 +92,11 @@ export const useRecordingStore = create<RecordingStore>((set, get) => ({
         set({ snapshot: { ...s, recording: { ...s.recording, status: status as 'live' | 'ended' | 'planned', ended_at } } });
         break;
       }
+      case 'recording.title': {
+        const { title } = event.payload as { title: string };
+        set({ snapshot: { ...s, recording: { ...s.recording, title } } });
+        break;
+      }
       case 'header.stats': {
         set({ snapshot: { ...s, header_stats: event.payload as HeaderStats } });
         break;
