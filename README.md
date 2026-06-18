@@ -384,6 +384,38 @@ Zie MCP_README.md voor meer opties (GitHub, lokaal pad, virtual environment).
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 ```
 
+## Dashboard
+
+Het Live Meeting Intelligence Dashboard biedt real-time AI-analyse van opnames via een WebSocket-gedreven interface op poort 8100.
+
+### Starten
+
+```bash
+python -m dashboard
+```
+
+Het dashboard start op <http://localhost:8100>.
+
+### Stoppen
+
+Zoek het PID en stop het proces:
+
+```bash
+# Zoek het PID
+lsof -i :8100 | grep LISTEN
+
+# Stop het dashboard
+kill <PID>
+```
+
+Of in één commando:
+
+```bash
+kill $(lsof -ti :8100)
+```
+
+Zie [DASHBOARD_README.md](DASHBOARD_README.md) voor volledige configuratie (PostgreSQL, Ollama, Anthropic API key, etc.).
+
 ## Licentie
 
 MIT License

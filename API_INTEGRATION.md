@@ -9,6 +9,10 @@ Beide servers gebruiken dezelfde opslag locatie als de hoofdapplicatie:
 ~/Documents/VoiceCapture/
 ```
 
+1. Een
+1. Twee
+1. Drie
+
 ## OpenAPI Server
 
 De OpenAPI server draait automatisch wanneer je VoiceCapture start.
