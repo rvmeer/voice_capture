@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from typing import Any
 
 from fastapi import FastAPI
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from fastapi.staticfiles import StaticFiles
 
 from dashboard.analyzer import AnalyzerWorker, build_provider
@@ -55,7 +58,17 @@ def create_app() -> FastAPI:
                 await worker_task
             await close_pool()
 
+    _access_log = logging.getLogger("dashboard.access")
+
+    class _LogNonOK(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            response = await call_next(request)
+            if response.status_code >= 400:
+                _access_log.warning('%s %s → %s', request.method, request.url.path, response.status_code)
+            return response
+
     app = FastAPI(title="Voice Capture Dashboard", lifespan=lifespan)
+    app.add_middleware(_LogNonOK)
     app.include_router(ingest.router)
     app.include_router(setup.router)
     app.include_router(read.router)

@@ -13,6 +13,7 @@ import shutil
 import platform
 import subprocess
 import time
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -336,6 +337,10 @@ class VoiceCapture(QObject):
         self.selected_ollama_model = ""
         self.determine_title = False  # Default: off
 
+        # Dashboard
+        self.dashboard_enabled = True  # Default: on
+        self.dashboard_process = None  # subprocess.Popen handle if we started it
+
         # Load persisted settings (may override defaults above)
         self._load_settings()
 
@@ -402,6 +407,9 @@ class VoiceCapture(QObject):
         # Initialize tray icon (GUI) — uses self.selected_model_name and self.use_mlx
         self.init_tray_icon()
 
+        # Sync dashboard menu state with actual process state after short delay
+        QTimer.singleShot(500, self._check_and_sync_dashboard_state)
+
         # Setup global hotkey (macOS only)
         self.setup_global_hotkey()
 
@@ -467,7 +475,9 @@ class VoiceCapture(QObject):
                     self.determine_title = data["determine_title"]
                 if isinstance(data.get("ollama_model"), str):
                     self.selected_ollama_model = data["ollama_model"]
-                logger.info(f"Settings loaded: model={self.selected_model_name}, use_mlx={self.use_mlx}, determine_title={self.determine_title}")
+                if isinstance(data.get("dashboard_enabled"), bool):
+                    self.dashboard_enabled = data["dashboard_enabled"]
+                logger.info(f"Settings loaded: model={self.selected_model_name}, use_mlx={self.use_mlx}, determine_title={self.determine_title}, dashboard_enabled={self.dashboard_enabled}")
         except Exception as e:
             logger.warning(f"Could not load settings: {e}")
 
@@ -480,6 +490,7 @@ class VoiceCapture(QObject):
                     "use_mlx": self.use_mlx,
                     "determine_title": self.determine_title,
                     "ollama_model": self.selected_ollama_model,
+                    "dashboard_enabled": self.dashboard_enabled,
                 }, f, indent=2)
             logger.debug(f"Settings saved: model={self.selected_model_name}, use_mlx={self.use_mlx}, determine_title={self.determine_title}")
         except Exception as e:
@@ -562,6 +573,18 @@ class VoiceCapture(QObject):
         self.tray_ollama_model_menu.setEnabled(self.ollama_available)
         self._rebuild_ollama_model_menu()
         self.tray_menu.addMenu(self.tray_ollama_model_menu)
+
+        self.tray_menu.addSeparator()
+
+        # Dashboard toggle + open
+        self.tray_dashboard_enabled_action = self.tray_menu.addAction("Dashboard ingeschakeld")
+        self.tray_dashboard_enabled_action.setCheckable(True)
+        self.tray_dashboard_enabled_action.setChecked(self.dashboard_enabled)
+        self.tray_dashboard_enabled_action.triggered.connect(self.on_tray_toggle_dashboard)
+
+        self.tray_open_dashboard_action = self.tray_menu.addAction("Open Dashboard")
+        self.tray_open_dashboard_action.setEnabled(self.dashboard_enabled)
+        self.tray_open_dashboard_action.triggered.connect(self.on_tray_open_dashboard)
 
         self.tray_menu.addSeparator()
 
@@ -818,6 +841,115 @@ class VoiceCapture(QObject):
             2000,
         )
 
+    def on_tray_toggle_dashboard(self):
+        """Handle dashboard enabled/disabled toggle - GUI handler"""
+        enabling = self.tray_dashboard_enabled_action.isChecked()
+        self.dashboard_enabled = enabling
+        self._save_settings()
+        if enabling:
+            self._start_dashboard_process()
+            self.tray_icon.showMessage(
+                "Dashboard",
+                "Dashboard wordt gestart...",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
+        else:
+            self._stop_dashboard_process()
+            self.tray_icon.showMessage(
+                "Dashboard",
+                "Dashboard gestopt",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
+        self._update_dashboard_menu_state()
+
+    def on_tray_open_dashboard(self):
+        """Open the dashboard in the default browser - GUI handler"""
+        if self._check_dashboard_running():
+            webbrowser.open("http://localhost:8100")
+            return
+        # Dashboard may still be starting up — poll briefly before giving up
+        self.tray_icon.showMessage(
+            "Dashboard",
+            "Dashboard wordt opgestart, even wachten...",
+            QSystemTrayIcon.MessageIcon.Information,
+            3000,
+        )
+        def _wait_and_open():
+            import time as _time
+            for _ in range(16):  # up to 8 seconds
+                _time.sleep(0.5)
+                if self._check_dashboard_running():
+                    webbrowser.open("http://localhost:8100")
+                    return
+            self.tray_icon.showMessage(
+                "Dashboard",
+                "Dashboard kon niet worden bereikt. Controleer de logs.",
+                QSystemTrayIcon.MessageIcon.Warning,
+                4000,
+            )
+        import threading as _threading
+        _threading.Thread(target=_wait_and_open, daemon=True).start()
+
+    def _check_dashboard_running(self) -> bool:
+        """Return True if the dashboard is listening on port 8100."""
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", 8100), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
+    def _check_and_sync_dashboard_state(self):
+        """On startup: start the dashboard if enabled but not yet running."""
+        if self.dashboard_enabled and not self._check_dashboard_running():
+            self._start_dashboard_process()
+        self._update_dashboard_menu_state()
+
+    def _update_dashboard_menu_state(self):
+        """Sync Open Dashboard greyed state with current dashboard_enabled."""
+        self.tray_open_dashboard_action.setEnabled(self.dashboard_enabled)
+
+    def _start_dashboard_process(self):
+        """Start the dashboard as a subprocess, unless port 8100 is already in use."""
+        if self._check_dashboard_running():
+            logger.info("Dashboard al bereikbaar op port 8100, geen nieuw process gestart")
+            return
+        try:
+            project_dir = Path(__file__).parent
+            self.dashboard_process = subprocess.Popen(
+                [sys.executable, "-m", "dashboard"],
+                cwd=str(project_dir),
+            )
+            logger.info(f"Dashboard process gestart (PID {self.dashboard_process.pid})")
+        except Exception as e:
+            logger.warning(f"Kon dashboard niet starten: {e}")
+
+    def _stop_dashboard_process(self):
+        """Stop the dashboard process (own handle or by port) and wait for port release."""
+        if self.dashboard_process and self.dashboard_process.poll() is None:
+            self.dashboard_process.terminate()
+            try:
+                self.dashboard_process.wait(timeout=5)
+            except Exception:
+                self.dashboard_process.kill()
+            logger.info("Dashboard process gestopt")
+            self.dashboard_process = None
+        else:
+            self.dashboard_process = None
+            # Fallback: kill by port (handles dashboards started outside this app)
+            try:
+                result = subprocess.run(
+                    ["lsof", "-ti", ":8100"], capture_output=True, text=True, timeout=3
+                )
+                for pid_str in result.stdout.strip().split():
+                    if pid_str.isdigit():
+                        subprocess.run(["kill", pid_str], timeout=3)
+                        logger.info(f"Dashboard process gekilld (PID {pid_str})")
+            except Exception as e:
+                logger.warning(f"Kon dashboard process niet stoppen: {e}")
+
     def on_tray_set_ollama_model(self, model_name: str):
         """Handle Ollama model selection - GUI handler"""
         self.selected_ollama_model = model_name
@@ -910,17 +1042,17 @@ class VoiceCapture(QObject):
         self.recording_manager.update_recording(recording_id, name=title)
         logger.info(f"Ollama: titel opgeslagen voor {recording_id}: '{title}'")
         # Push title to dashboard (PostgreSQL) via API
-        if self.dashboard_client:
+        if self.dashboard_client and self.dashboard_enabled:
             try:
                 self.dashboard_client.recording_title_updated(recording_id, title)
             except Exception as e:
                 logger.warning(f"Dashboard: titel update mislukt voor {recording_id}: {e}")
-        # Update Qdrant directly (same process = no lock conflict)
+        # Update Qdrant via existing indexer (avoids concurrent embedded-client conflict)
         def _update_qdrant():
             try:
-                from qdrant import QdrantIndexer
-                QdrantIndexer().update_recording_name(recording_id, title)
-                logger.info(f"Qdrant: recording_name bijgewerkt voor {recording_id}")
+                if self.qdrant_indexer:
+                    self.qdrant_indexer.update_recording_name(recording_id, title)
+                    logger.info(f"Qdrant: recording_name bijgewerkt voor {recording_id}")
             except Exception as e:
                 logger.warning(f"Qdrant: titel update mislukt voor {recording_id}: {e}")
         import threading as _threading
@@ -1115,6 +1247,14 @@ class VoiceCapture(QObject):
                 logger.debug(f"Failed stopping hotkey listener: {e}")
             self.global_hotkey_listener = None
 
+        # Stop dashboard process if we started it
+        if self.dashboard_process and self.dashboard_process.poll() is None:
+            try:
+                self.dashboard_process.terminate()
+                logger.info("Dashboard process gestopt bij afsluiten")
+            except Exception as e:
+                logger.debug(f"Dashboard process stop bij afsluiten mislukt: {e}")
+
         # Call business logic
         self.tray_actions.quit_application()
 
@@ -1166,7 +1306,7 @@ class VoiceCapture(QObject):
         logger.info(f"Recording started with ID: {self.current_recording_id}")
 
         # Notify dashboard (best effort)
-        if self.dashboard_client:
+        if self.dashboard_client and self.dashboard_enabled:
             try:
                 self.dashboard_client.recording_started(
                     self.current_recording_id,
@@ -1330,7 +1470,7 @@ class VoiceCapture(QObject):
                 logger.warning(f"Qdrant live segment indexing failed for segment {segment_num}: {e}")
 
         # Dashboard live segment push (best effort)
-        if self.dashboard_client and self.current_recording_id:
+        if self.dashboard_client and self.dashboard_enabled and self.current_recording_id:
             try:
                 self.dashboard_client.segment(
                     self.current_recording_id,
@@ -1482,7 +1622,7 @@ class VoiceCapture(QObject):
             logger.warning(f"Qdrant was still initializing when recording {self.current_recording_id} finished — recording not indexed")
 
         # Notify dashboard recording ended (best effort)
-        if self.dashboard_client and self.current_recording_id:
+        if self.dashboard_client and self.dashboard_enabled and self.current_recording_id:
             try:
                 self.dashboard_client.recording_ended(self.current_recording_id, datetime.now())
             except Exception as e:

@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """
-Curate orphaned recordings: remove DB + Qdrant entries for recordings
-that no longer have a folder in ~/Documents/VoiceCapture/.
+Curate recordings in the database.
+
+Actions
+-------
+(default)        Dry-run: show orphaned recordings (in DB, no folder on disk).
+--yes            Delete orphaned recordings from DB + Qdrant.
+--fix-stuck      Close recordings stuck in status='live' (set ended_at to last
+                 segment timestamp, or started_at, or now; set status='ended').
+                 Combine with --yes to apply; default is dry-run.
 
 Usage:
-    python scripts/curate_recordings.py            # dry-run: show what would be removed
-    python scripts/curate_recordings.py --yes      # actually delete
-    python scripts/curate_recordings.py --recordings-dir /path/to/dir
+    python scripts/curate_recordings.py                   # dry-run orphan report
+    python scripts/curate_recordings.py --yes             # delete orphans
+    python scripts/curate_recordings.py --fix-stuck       # show stuck recordings
+    python scripts/curate_recordings.py --fix-stuck --yes # close stuck recordings
 """
 
 from __future__ import annotations
@@ -58,6 +66,39 @@ def delete_from_qdrant(recording_id: str) -> bool:
         return False
 
 
+def get_stuck_recordings(conn: psycopg.Connection) -> list[dict]:
+    """Return recordings with status='live' (no ended_at set)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                r.id, r.recording_id, r.title, r.status, r.started_at,
+                MAX(s.ts) AS last_segment_ts,
+                COUNT(s.id) AS segment_count
+            FROM recording r
+            LEFT JOIN segment s ON s.recording_id = r.id
+            WHERE r.status = 'live'
+            GROUP BY r.id
+            ORDER BY r.started_at DESC
+            """
+        )
+        return cur.fetchall()
+
+
+def close_stuck_recording(conn: psycopg.Connection, recording_uuid: str, ended_at) -> None:
+    """Set status='ended' and ended_at for a stuck recording."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE recording
+            SET status = 'ended', ended_at = %s
+            WHERE id = %s AND status = 'live'
+            """,
+            (ended_at, recording_uuid),
+        )
+    conn.commit()
+
+
 def delete_from_db(conn: psycopg.Connection, recording_uuid: str) -> None:
     """Delete a recording from PostgreSQL (cascades to all child tables).
     Also removes past_reference rows where this recording is the source
@@ -69,15 +110,67 @@ def delete_from_db(conn: psycopg.Connection, recording_uuid: str) -> None:
     conn.commit()
 
 
+# ── Fix-stuck action ──────────────────────────────────────────────────────────
+
+def _run_fix_stuck(args) -> None:
+    from datetime import timezone
+
+    print(f"🗄️  Database DSN : {args.dsn}")
+    print()
+
+    with psycopg.connect(args.dsn, row_factory=dict_row) as conn:
+        stuck = get_stuck_recordings(conn)
+
+        if not stuck:
+            print("✅ No stuck recordings found.")
+            return
+
+        print(f"⚠️  {len(stuck)} recording(s) stuck in status='live':")
+        print()
+        for row in stuck:
+            started = row["started_at"].strftime("%Y-%m-%d %H:%M") if row["started_at"] else "?"
+            last_seg = row["last_segment_ts"].strftime("%Y-%m-%d %H:%M") if row["last_segment_ts"] else "no segments"
+            print(f"  {row['recording_id']}  —  {row['title']!r}")
+            print(f"    started {started}  |  last segment: {last_seg}  |  {row['segment_count']} segment(s)")
+        print()
+
+        if not args.yes:
+            print("👉 Dry-run mode. Pass --yes to close these recordings.")
+            return
+
+        answer = input(f"Close {len(stuck)} recording(s)? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Aborted.")
+            return
+
+        import datetime
+        now = datetime.datetime.now(tz=timezone.utc)
+        print()
+        for row in stuck:
+            ended_at = row["last_segment_ts"] or row["started_at"] or now
+            if ended_at.tzinfo is None:
+                ended_at = ended_at.replace(tzinfo=timezone.utc)
+            close_stuck_recording(conn, str(row["id"]), ended_at)
+            print(f"  ✅ Closed {row['recording_id']}  (ended_at = {ended_at.strftime('%Y-%m-%d %H:%M')})")
+
+        print()
+        print(f"Done. Closed {len(stuck)} recording(s).")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Remove orphaned recordings from DB + Qdrant")
-    parser.add_argument("--yes", "-y", action="store_true", help="Actually delete (default is dry-run)")
+    parser = argparse.ArgumentParser(description="Curate recordings in the database")
+    parser.add_argument("--yes", "-y", action="store_true", help="Actually apply changes (default is dry-run)")
+    parser.add_argument("--fix-stuck", action="store_true", help="Close recordings stuck in status='live'")
     parser.add_argument("--recordings-dir", default=str(DEFAULT_RECORDINGS_DIR), help="Path to VoiceCapture recordings folder")
     parser.add_argument("--dsn", default=DEFAULT_DSN, help="PostgreSQL DSN")
     parser.add_argument("--skip-qdrant", action="store_true", help="Skip Qdrant deletion (only remove from DB)")
     args = parser.parse_args()
+
+    if args.fix_stuck:
+        _run_fix_stuck(args)
+        return
 
     recordings_dir = Path(args.recordings_dir)
     if not recordings_dir.exists():

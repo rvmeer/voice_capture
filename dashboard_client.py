@@ -9,7 +9,8 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib import parse, request
+import errno as _errno
+from urllib import error as _urlerror, parse, request
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,15 @@ class DashboardClient:
                     response.read()
                 return
             except Exception as exc:
+                # Connection refused = dashboard is not running; no point retrying
+                if (
+                    isinstance(exc, _urlerror.URLError)
+                    and isinstance(exc.reason, OSError)
+                    and getattr(exc.reason, "errno", None) == _errno.ECONNREFUSED
+                ):
+                    logger.debug("Dashboard niet bereikbaar (%s): %s", url, exc)
+                    self._spool(url, payload, method=method)
+                    return
                 logger.warning("Dashboard request failed (%s, attempt %s/3): %s", url, attempt + 1, exc)
                 if attempt == 2:
                     self._spool(url, payload, method=method)
