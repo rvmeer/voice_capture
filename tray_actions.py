@@ -118,6 +118,45 @@ class TrayActions:
         logger.info(f"Starting retranscription of recording {recording_id} with model {self.app.selected_model_name}")
         self.app.start_retranscription(recording_id)
 
+    def get_speaker_identification_queue(self):
+        """Return recordings where all_participants_recognized is not True and wav exists."""
+        self.app.recording_manager.load_recordings()
+        queue = []
+        for recording in self.app.recording_manager.recordings:
+            if recording.get('all_participants_recognized') is True:
+                continue
+            recording_id = recording.get('id', '')
+            rec_dir = self.app.recording_manager.recordings_dir / f"recording_{recording_id}"
+            audio_file = rec_dir / f"recording_{recording_id}.wav"
+            if audio_file.exists():
+                queue.append(recording)
+        return queue
+
+    def run_silent_speaker_identification(self, recording_id, on_complete):
+        """
+        Run diarization + embedding + voiceprint matching in a background thread.
+        Calls on_complete(recording_id, results, store, error) from that thread.
+        GUI caller must switch to main thread (e.g. QTimer.singleShot) before touching Qt.
+        """
+        import threading
+
+        def _run():
+            try:
+                from speaker_identification import identify_speakers
+                from voiceprint_store import VoiceprintStore
+
+                store = VoiceprintStore()
+                store.load()
+                results = identify_speakers(recording_id, self.app.recording_manager, store)
+                on_complete(recording_id, results, store, None)
+            except ImportError as e:
+                on_complete(recording_id, None, None, str(e))
+            except Exception as e:
+                logger.error(f"Speaker identification failed for {recording_id}: {e}", exc_info=True)
+                on_complete(recording_id, None, None, str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def quit_application(self):
         """Quit the application - business logic only"""
         logger.info("Quitting application...")

@@ -6,12 +6,16 @@
 # with full support for word timestamps and diarization
 mlx-whisper
 
-# Speaker Diarization - Identify who is speaking when
+# Speaker Diarization & Identification - Identify who is speaking when
 # Requires accepting user agreements at:
 # - https://huggingface.co/pyannote/speaker-diarization-3.1
 # - https://huggingface.co/pyannote/segmentation-3.0
+# - https://huggingface.co/pyannote/embedding
 # Also requires setting HF_TOKEN environment variable with your HuggingFace token
 pyannote.audio
+
+# Audio playback in speaker identification popup (play representative fragment)
+sounddevice
 
 # Install these optional dependencies with:
 # pip install -r requirements-optional.txt

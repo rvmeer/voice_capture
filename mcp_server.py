@@ -313,9 +313,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
                 "date": rec.get("date"),
                 "name": rec.get("name")
             }
-            # Only include duration if it exists in the recording
             if "duration" in rec:
                 rec_data["duration"] = rec.get("duration")
+            if rec.get("participants"):
+                rec_data["participants"] = rec.get("participants")
             result.append(rec_data)
 
         return [

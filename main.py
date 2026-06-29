@@ -24,7 +24,8 @@ import whisper
 import torch
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMessageBox,
-    QDialog, QVBoxLayout, QListWidget, QPushButton, QLabel, QHBoxLayout, QListWidgetItem
+    QDialog, QVBoxLayout, QListWidget, QPushButton, QLabel, QHBoxLayout, QListWidgetItem,
+    QComboBox, QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QPainter, QPixmap, QPen, QColor, QActionGroup, QCursor, QKeySequence
@@ -315,6 +316,8 @@ class VoiceCapture(QObject):
     ollama_status_checked = pyqtSignal(bool, object)  # (available, models_list)
     ollama_title_generated = pyqtSignal(str, str)      # (recording_id, title)
     hotkey_toggle_requested = pyqtSignal()             # Global hotkey -> toggle recording
+    speaker_id_result = pyqtSignal(str, object, object, object, object, int)  # (rec_id, results, store, error, queue, index)
+    speaker_id_silent_done = pyqtSignal(str, object, object)                  # (rec_id, results, error) for Entry Point B
 
     def __init__(self):
         super().__init__()
@@ -356,6 +359,8 @@ class VoiceCapture(QObject):
         self.ollama_status_checked.connect(self.on_ollama_status_checked)
         self.ollama_title_generated.connect(self._apply_generated_title)
         self.hotkey_toggle_requested.connect(self._on_hotkey_toggle_requested)
+        self.speaker_id_result.connect(self._handle_speaker_id_result)
+        self.speaker_id_silent_done.connect(self._apply_silent_speaker_id)
 
         # Track pending transcription
         self.pending_transcription = False
@@ -597,6 +602,10 @@ class VoiceCapture(QObject):
         # Add retranscribe action
         retranscribe_action = self.tray_menu.addAction("Hertranscriberen")
         retranscribe_action.triggered.connect(self.on_tray_retranscribe)
+
+        # Add speaker identification action
+        self.speaker_id_action = self.tray_menu.addAction("Spreker identificatie")
+        self.speaker_id_action.triggered.connect(self.on_tray_speaker_identification)
 
         self.tray_menu.addSeparator()
 
@@ -1634,6 +1643,9 @@ class VoiceCapture(QObject):
         elif self.determine_title:
             logger.warning("Ollama: titelbepaling actief maar geen model geselecteerd")
 
+        # Silent speaker identification: auto-match known speakers in background
+        self._run_silent_speaker_identification(self.current_recording_id)
+
         # Reset state
         self.is_recording = False
         self.pending_recording_name = None
@@ -1870,6 +1882,321 @@ class VoiceCapture(QObject):
     def on_transcription_complete(self, result):
         """Handle transcription complete signal"""
         logger.info("Transcription complete")
+
+    # -------------------------------------------------------------------------
+    # Speaker identification (Entry Point A: tray, Entry Point B: silent)
+    # -------------------------------------------------------------------------
+
+    def _check_speaker_id_prerequisites(self):
+        """
+        Check that pyannote.audio is installed and HF_TOKEN is configured.
+        Shows an actionable dialog and returns False if prerequisites are missing.
+        """
+        try:
+            import pyannote.audio  # noqa: F401
+        except ImportError:
+            QMessageBox.warning(
+                None, "Spreker identificatie",
+                "pyannote.audio is niet geïnstalleerd.\n\n"
+                "Installeer met:\n  pip install pyannote.audio\n\n"
+                "Zorg ook dat HF_TOKEN is ingesteld in .env."
+            )
+            return False
+
+        import os
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=False)
+        hf_token = os.getenv('HF_TOKEN', '').strip()
+        if not hf_token:
+            QMessageBox.warning(
+                None, "HuggingFace token ontbreekt",
+                "Spreker identificatie vereist een HuggingFace-token.\n\n"
+                "Stappen:\n"
+                "1. Maak een account op https://huggingface.co\n"
+                "2. Haal een token op via https://huggingface.co/settings/tokens\n"
+                "3. Accepteer de modellicenties:\n"
+                "   • https://huggingface.co/pyannote/speaker-diarization-3.1\n"
+                "   • https://huggingface.co/pyannote/segmentation-3.0\n"
+                "   • https://huggingface.co/pyannote/embedding\n"
+                "4. Voeg toe aan .env in de projectmap:\n"
+                "   HF_TOKEN=hf_jouwtoken"
+            )
+            return False
+
+        return True
+
+    def on_tray_speaker_identification(self):
+        """GUI handler for 'Spreker identificatie' tray action."""
+        if not self._check_speaker_id_prerequisites():
+            return
+
+        queue = self.tray_actions.get_speaker_identification_queue()
+        if not queue:
+            QMessageBox.information(
+                None, "Spreker identificatie",
+                "Alle opnames hebben al een volledig ingevuld deelnemersprofiel."
+            )
+            return
+
+        self._process_speaker_id_queue(queue, 0)
+
+    def _process_speaker_id_queue(self, queue, index):
+        """Start processing the next recording in the speaker identification queue."""
+        if index >= len(queue):
+            if hasattr(self, 'tray_icon'):
+                self.tray_icon.showMessage(
+                    "Spreker identificatie",
+                    f"{len(queue)} opname(s) verwerkt.",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    3000
+                )
+            return
+
+        recording = queue[index]
+        recording_id = recording.get('id', '')
+        name = recording.get('name', recording_id)
+
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.showMessage(
+                "Spreker identificatie",
+                f"Verwerken: {name}…",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+
+        def on_complete(rec_id, results, store, error):
+            # Emit signal from background thread — Qt delivers it on the main thread
+            self.speaker_id_result.emit(rec_id, results, store, error, queue, index)
+
+        self.tray_actions.run_silent_speaker_identification(recording_id, on_complete)
+
+    def _handle_speaker_id_result(self, recording_id, results, store, error, queue, index):
+        """Called on main thread when background identification completes."""
+        if error:
+            QMessageBox.warning(
+                None, "Spreker identificatie fout",
+                f"Fout bij verwerken van opname:\n{error}"
+            )
+            self._process_speaker_id_queue(queue, index + 1)
+            return
+
+        if not results:
+            self.recording_manager.update_recording(
+                recording_id, participants=[], all_participants_recognized=True
+            )
+            self._process_speaker_id_queue(queue, index + 1)
+            return
+
+        # Apply matched speakers to participants
+        rec = self.recording_manager.get_recording(recording_id)
+        recording_name = rec.get('name') or recording_id
+        participants = list(rec.get('participants', []) or [])
+        matched = [r for r in results if r.status == 'matched' and r.name]
+        for r in matched:
+            if r.name not in participants:
+                participants.append(r.name)
+                logger.info(f"Auto-assigned '{r.name}' ({r.label}) → participants of '{recording_name}'")
+        if not matched:
+            logger.info(f"No speakers auto-matched for '{recording_name}'")
+        if participants:
+            self.recording_manager.update_recording(recording_id, participants=participants)
+
+        # Show popups for each unknown speaker
+        rec_dir = self.recording_manager.recordings_dir / f"recording_{recording_id}"
+        audio_file = str(rec_dir / f"recording_{recording_id}.wav")
+        unknown_results = [r for r in results if r.status == 'unknown']
+        logger.info(f"Showing popups for {len(unknown_results)} unknown speaker(s) in '{recording_name}'")
+
+        for r in unknown_results:
+            dialog = self._build_speaker_popup(r.label, r.rep_fragment, audio_file, store)
+            dialog.show()
+            dialog.activateWindow()
+            dialog.raise_()
+            dialog.exec()
+
+            chosen = dialog._chosen_name
+            if not chosen:
+                chosen = "Onbekend"
+
+            if chosen != "Onbekend" and r.embedding is not None:
+                store.add_embedding(chosen, r.embedding)
+
+            rec = self.recording_manager.get_recording(recording_id)
+            parts = list(rec.get('participants', []) or [])
+            if chosen not in parts:
+                parts.append(chosen)
+            self.recording_manager.update_recording(recording_id, participants=parts)
+
+        self.recording_manager.update_recording(recording_id, all_participants_recognized=True)
+        self._process_speaker_id_queue(queue, index + 1)
+
+    def _build_speaker_popup(self, speaker_label, rep_fragment, audio_file, store):
+        """Build a modal QDialog for identifying one unknown speaker."""
+        dialog = QDialog()
+        dialog.setWindowTitle(f"Spreker identificatie: {speaker_label}")
+        dialog.setMinimumWidth(420)
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        dialog._chosen_name = None
+
+        layout = QVBoxLayout()
+
+        # Fragment playback
+        if rep_fragment:
+            start, end = rep_fragment
+            play_dur = min(end - start, 10.0)
+            frag_label = QLabel(f"Fragment: {start:.1f}s – {end:.1f}s  ({end - start:.1f}s beschikbaar)")
+            layout.addWidget(frag_label)
+            play_btn = QPushButton("▶  Speel fragment")
+            play_btn.clicked.connect(
+                lambda: self._play_audio_fragment(audio_file, start, start + play_dur)
+            )
+            layout.addWidget(play_btn)
+
+        layout.addWidget(QLabel("Wie is deze spreker?"))
+
+        # Dropdown with known names
+        combo = QComboBox()
+        combo.addItem("")
+        for name in sorted(store.all_names(), key=str.casefold):
+            combo.addItem(name)
+        layout.addWidget(combo)
+
+        layout.addWidget(QLabel("Of voer een nieuwe naam in:"))
+        name_edit = QLineEdit()
+        layout.addWidget(name_edit)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Sla op")
+        save_btn.setEnabled(False)
+        skip_btn = QPushButton("Overslaan")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(skip_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.setLayout(layout)
+
+        def _check_name():
+            save_btn.setEnabled(bool(name_edit.text().strip() or combo.currentText().strip()))
+
+        combo.currentTextChanged.connect(_check_name)
+        name_edit.textChanged.connect(_check_name)
+
+        def on_save():
+            chosen = name_edit.text().strip() or combo.currentText().strip()
+            if chosen:
+                dialog._chosen_name = chosen
+                dialog.accept()
+
+        def on_skip():
+            dialog._chosen_name = None
+            dialog.accept()
+
+        save_btn.clicked.connect(on_save)
+        skip_btn.clicked.connect(on_skip)
+
+        return dialog
+
+    def _play_audio_fragment(self, audio_file, start, end):
+        """Play an audio fragment using sounddevice."""
+        try:
+            import sounddevice as sd
+            import wave as _wave
+            import numpy as np
+
+            with _wave.open(audio_file, 'r') as wf:
+                sample_rate = wf.getframerate()
+                n_channels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                start_frame = int(start * sample_rate)
+                end_frame = int(end * sample_rate)
+                wf.setpos(start_frame)
+                raw = wf.readframes(end_frame - start_frame)
+
+            dtype_map = {1: np.uint8, 2: np.int16, 4: np.int32}
+            dtype = dtype_map.get(sampwidth, np.int16)
+            audio = np.frombuffer(raw, dtype=dtype).astype(np.float32)
+
+            if dtype == np.uint8:
+                audio = audio / 128.0 - 1.0
+            elif dtype == np.int16:
+                audio = audio / 32768.0
+            elif dtype == np.int32:
+                audio = audio / 2147483648.0
+
+            if n_channels > 1:
+                audio = audio.reshape(-1, n_channels)
+
+            sd.stop()
+            sd.play(audio, sample_rate)
+
+        except ImportError:
+            QMessageBox.warning(
+                None, "Geen audio-weergave",
+                "sounddevice is niet geïnstalleerd.\nInstalleer met: pip install sounddevice"
+            )
+        except Exception as e:
+            logger.error(f"Error playing audio fragment: {e}", exc_info=True)
+            QMessageBox.warning(None, "Afspeelfout", f"Kan fragment niet afspelen:\n{e}")
+
+    def _run_silent_speaker_identification(self, recording_id):
+        """
+        Entry Point B: run speaker identification silently after recording finalization.
+        Matches known speakers automatically; unknown speakers are left for Entry Point A.
+        Skips silently if HF_TOKEN is not configured.
+        """
+        import os
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=False)
+        if not os.getenv('HF_TOKEN', '').strip():
+            logger.debug("Silent speaker identification skipped: HF_TOKEN not configured")
+            return
+
+        def on_complete(rec_id, results, store, error):
+            # Emit signal — Qt delivers it on the main thread
+            self.speaker_id_silent_done.emit(rec_id, results, error)
+
+        self.tray_actions.run_silent_speaker_identification(recording_id, on_complete)
+
+    def _apply_silent_speaker_id(self, rec_id, results, error):
+        """Main-thread slot for Entry Point B: apply auto-matched speakers to JSON."""
+        if error or results is None:
+            logger.warning(f"Silent speaker identification skipped: {error}")
+            return
+
+        rec = self.recording_manager.get_recording(rec_id)
+        recording_name = rec.get('name') or rec_id
+        matched = [r for r in results if r.status == 'matched' and r.name]
+        unmatched = [r for r in results if r.status != 'matched']
+        all_matched = len(unmatched) == 0
+
+        participants = list(rec.get('participants', []) or [])
+        for r in matched:
+            if r.name not in participants:
+                participants.append(r.name)
+                logger.info(f"Auto-assigned '{r.name}' ({r.label}) → participants of '{recording_name}'")
+        if not matched:
+            logger.info(f"No speakers auto-matched for '{recording_name}' "
+                        f"({len(results)} speaker(s) need manual identification)")
+        if unmatched:
+            logger.info(f"{len(unmatched)} speaker(s) unrecognized in '{recording_name}': "
+                        f"{[r.label for r in unmatched]}")
+
+        self.recording_manager.update_recording(
+            rec_id,
+            participants=participants,
+            all_participants_recognized=all_matched
+        )
+
+        if results and hasattr(self, 'tray_icon'):
+            n_total = len(results)
+            n_matched = len(matched)
+            self.tray_icon.showMessage(
+                "Sprekers herkend",
+                f"{n_matched} van {n_total} sprekers automatisch herkend",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000
+            )
 
 
 def main():

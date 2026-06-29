@@ -126,13 +126,24 @@ def diarize_recording(args):
                 logger.info(f"  Maximum speakers: {max_speakers}")
 
         # Perform diarization
-        output = pipeline(str(audio_file), **diarization_params)
+        raw = pipeline(str(audio_file), **diarization_params)
+
+        # pyannote 4.x: Pipeline.__call__ is a generator function (has `yield` for
+        # batch path), so even a single-file call returns a generator object.
+        import types
+        if isinstance(raw, types.GeneratorType):
+            try:
+                next(raw)
+            except StopIteration as _e:
+                annotation = _e.value
+        else:
+            annotation = raw
 
         # Prepare output
         output_lines = []
 
-        # Process each segment using the correct API
-        for turn, speaker in output.speaker_diarization:
+        # Annotation.__iter__ yields (Segment, label) 2-tuples
+        for turn, speaker in annotation:
             timestamp = format_timestamp(turn.start)
             output_lines.append(f"{timestamp} {speaker}")
 
