@@ -1643,9 +1643,6 @@ class VoiceCapture(QObject):
         elif self.determine_title:
             logger.warning("Ollama: titelbepaling actief maar geen model geselecteerd")
 
-        # Silent speaker identification: auto-match known speakers in background
-        self._run_silent_speaker_identification(self.current_recording_id)
-
         # Reset state
         self.is_recording = False
         self.pending_recording_name = None
@@ -2028,6 +2025,17 @@ class VoiceCapture(QObject):
             self.recording_manager.update_recording(recording_id, participants=parts)
 
         self.recording_manager.update_recording(recording_id, all_participants_recognized=True)
+
+        # Sync final participants to Qdrant final_chunk points
+        if self.qdrant_enabled and self.qdrant_indexer:
+            final_rec = self.recording_manager.get_recording(recording_id)
+            final_participants = final_rec.get('participants') or []
+            if final_participants:
+                try:
+                    self.qdrant_indexer.update_participants(recording_id, final_participants)
+                except Exception as e:
+                    logger.warning(f"Qdrant participants update failed for {recording_id}: {e}")
+
         self._process_speaker_id_queue(queue, index + 1)
 
     def _build_speaker_popup(self, speaker_label, rep_fragment, audio_file, store):
@@ -2187,6 +2195,13 @@ class VoiceCapture(QObject):
             participants=participants,
             all_participants_recognized=all_matched
         )
+
+        # Sync participants to Qdrant final_chunk points
+        if self.qdrant_enabled and self.qdrant_indexer and participants:
+            try:
+                self.qdrant_indexer.update_participants(rec_id, participants)
+            except Exception as e:
+                logger.warning(f"Qdrant participants update failed for {rec_id}: {e}")
 
         if results and hasattr(self, 'tray_icon'):
             n_total = len(results)

@@ -119,7 +119,7 @@ class TrayActions:
         self.app.start_retranscription(recording_id)
 
     def get_speaker_identification_queue(self):
-        """Return recordings where all_participants_recognized is not True and wav exists."""
+        """Return recordings where all_participants_recognized is not True and wav exists, most recent first."""
         self.app.recording_manager.load_recordings()
         queue = []
         for recording in self.app.recording_manager.recordings:
@@ -130,6 +130,7 @@ class TrayActions:
             audio_file = rec_dir / f"recording_{recording_id}.wav"
             if audio_file.exists():
                 queue.append(recording)
+        queue.sort(key=lambda r: r.get('id', ''), reverse=True)
         return queue
 
     def run_silent_speaker_identification(self, recording_id, on_complete):

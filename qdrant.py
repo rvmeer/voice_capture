@@ -269,6 +269,76 @@ class QdrantIndexer:
             ),
         )
 
+    def update_participants(self, recording_id: str, participants: list[str]) -> int:
+        """
+        Set the participants payload on final_chunk points for a recording.
+        Returns the number of points updated (0 if none found).
+        """
+        client = self._client_instance()
+        *_, Filter, FieldCondition, MatchValue = self._require_qdrant()
+
+        filter_ = Filter(
+            must=[
+                FieldCondition(key="recording_id", match=MatchValue(value=recording_id)),
+                FieldCondition(key="kind", match=MatchValue(value="final_chunk")),
+            ]
+        )
+
+        # Count matching points first so we can report back
+        count_result = client.count(
+            collection_name=self.collection_name,
+            count_filter=filter_,
+            exact=True,
+        )
+        n = count_result.count if hasattr(count_result, "count") else 0
+        if n == 0:
+            return 0
+
+        client.set_payload(
+            collection_name=self.collection_name,
+            payload={"participants": participants},
+            points=filter_,
+        )
+        logger.info(f"Updated participants on {n} final_chunk point(s) for {recording_id}: {participants}")
+        return n
+
+    def sync_participants_from_json(self, *, month_prefix: str | None = None) -> dict[str, Any]:
+        """
+        Retroactively set participants on final_chunk points for all recordings
+        whose JSON has a non-empty participants field.
+        month_prefix: e.g. '202606' to restrict to June 2026.
+        """
+        updated_recordings = []
+        skipped = []
+
+        recording_dirs = sorted(self.recordings_dir.iterdir()) if self.recordings_dir.exists() else []
+
+        for rec_dir in recording_dirs:
+            if not rec_dir.is_dir() or not rec_dir.name.startswith("recording_"):
+                continue
+            rid = rec_dir.name.replace("recording_", "", 1)
+            if month_prefix and not rid.startswith(month_prefix):
+                continue
+            json_file = rec_dir / f"recording_{rid}.json"
+            if not json_file.exists():
+                continue
+            try:
+                with open(json_file, encoding="utf-8") as f:
+                    rec = json.load(f)
+            except Exception:
+                continue
+            participants = rec.get("participants") or []
+            if not participants:
+                skipped.append(rid)
+                continue
+            n = self.update_participants(rid, participants)
+            if n > 0:
+                updated_recordings.append({"recording_id": rid, "participants": participants, "chunks_updated": n})
+            else:
+                skipped.append(rid)
+
+        return {"updated": len(updated_recordings), "skipped": len(skipped), "recordings": updated_recordings}
+
 
     def index_live_segment(
         self,
