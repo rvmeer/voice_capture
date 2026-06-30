@@ -2040,12 +2040,23 @@ class VoiceCapture(QObject):
         logger.info(f"Showing popups for {len(unknown_results)} unknown speaker(s) in '{recording_name}'")
 
         aborted = False
+        last_pos = None
         for r in unknown_results:
-            dialog = self._build_speaker_popup(r.label, r.rep_fragment, audio_file, store)
+            best_hint = None
+            if r.embedding is not None:
+                best_hint, _ = store.best_match(r.embedding)
+            dialog = self._build_speaker_popup(
+                r.label, r.rep_fragment, audio_file, store,
+                recording_name=recording_name, recording_id=recording_id,
+                best_hint=best_hint,
+            )
+            if last_pos is not None:
+                dialog.move(last_pos)
             dialog.show()
             dialog.activateWindow()
             dialog.raise_()
             dialog.exec()
+            last_pos = dialog.pos()
 
             if dialog._abort:
                 aborted = True
@@ -2082,10 +2093,12 @@ class VoiceCapture(QObject):
 
         self._process_speaker_id_queue(queue, index + 1)
 
-    def _build_speaker_popup(self, speaker_label, rep_fragment, audio_file, store):
+    def _build_speaker_popup(self, speaker_label, rep_fragment, audio_file, store,
+                             recording_name=None, recording_id=None, best_hint=None):
         """Build a modal QDialog for identifying one unknown speaker."""
         dialog = QDialog()
-        dialog.setWindowTitle(f"Spreker identificatie: {speaker_label}")
+        title = f"{recording_name} ({recording_id})" if recording_name and recording_id else speaker_label
+        dialog.setWindowTitle(title)
         dialog.setMinimumWidth(420)
         dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         dialog._chosen_name = None
@@ -2114,13 +2127,16 @@ class VoiceCapture(QObject):
             )
             layout.addWidget(play_btn)
 
-        layout.addWidget(QLabel("Wie is deze spreker?"))
+        layout.addWidget(QLabel(f"Wie is deze spreker? ({speaker_label})"))
 
-        # Dropdown with known names
+        # Dropdown with known names; pre-select best_hint if provided
         combo = QComboBox()
         combo.addItem("")
-        for name in sorted(store.all_names(), key=str.casefold):
+        sorted_names = sorted(store.all_names(), key=str.casefold)
+        for name in sorted_names:
             combo.addItem(name)
+        if best_hint and best_hint in sorted_names:
+            combo.setCurrentText(best_hint)
         layout.addWidget(combo)
 
         layout.addWidget(QLabel("Of voer een nieuwe naam in:"))
@@ -2129,7 +2145,7 @@ class VoiceCapture(QObject):
 
         # Save button bottom-right, disabled until a name is provided
         save_btn = QPushButton("Sla op")
-        save_btn.setEnabled(False)
+        save_btn.setEnabled(bool(best_hint))
         bottom_btn_layout = QHBoxLayout()
         bottom_btn_layout.addStretch()
         bottom_btn_layout.addWidget(save_btn)
@@ -2140,8 +2156,15 @@ class VoiceCapture(QObject):
         def _check_name():
             save_btn.setEnabled(bool(name_edit.text().strip() or combo.currentText().strip()))
 
+        def _on_name_edit_changed(text):
+            if text.strip():
+                combo.blockSignals(True)
+                combo.setCurrentIndex(0)
+                combo.blockSignals(False)
+            _check_name()
+
         combo.currentTextChanged.connect(_check_name)
-        name_edit.textChanged.connect(_check_name)
+        name_edit.textChanged.connect(_on_name_edit_changed)
 
         def on_save():
             chosen = name_edit.text().strip() or combo.currentText().strip()
