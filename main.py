@@ -1478,6 +1478,21 @@ class VoiceCapture(QObject):
             except Exception as e:
                 logger.warning(f"Qdrant live segment indexing failed for segment {segment_num}: {e}")
 
+        # Log probable speaker hint for this segment (best-effort background)
+        if self.current_recording_id:
+            segment_file = (
+                self.base_recordings_dir
+                / f"recording_{self.current_recording_id}"
+                / "segments"
+                / f"segment_{segment_num:03d}.wav"
+            )
+            if segment_file.exists():
+                threading.Thread(
+                    target=self._log_segment_speaker_hint,
+                    args=(segment_file, segment_num),
+                    daemon=True,
+                ).start()
+
         # Dashboard live segment push (best effort)
         if self.dashboard_client and self.dashboard_enabled and self.current_recording_id:
             try:
@@ -1490,6 +1505,26 @@ class VoiceCapture(QObject):
                 )
             except Exception as e:
                 logger.warning(f"Dashboard segment push failed for segment {segment_num}: {e}")
+
+    def _log_segment_speaker_hint(self, segment_file, segment_num):
+        """Background: log the probable speaker for a transcribed segment."""
+        try:
+            from speaker_identification import get_segment_speaker_hint
+            from voiceprint_store import VoiceprintStore
+            store = VoiceprintStore()
+            store.load()
+            if not store.speakers:
+                logger.debug(f"Segment {segment_num}: no voiceprints yet, skipping speaker hint")
+                return
+            name, score = get_segment_speaker_hint(segment_file, store)
+            if name:
+                logger.info(f"Segment {segment_num}: probable speaker → '{name}' (score={score:.3f})")
+            else:
+                logger.info(f"Segment {segment_num}: speaker unknown (best score={score:.3f})")
+        except ImportError as e:
+            logger.debug(f"Segment {segment_num}: speaker hint skipped (pyannote not installed: {e})")
+        except Exception as e:
+            logger.warning(f"Segment speaker hint failed for segment {segment_num}: {e}", exc_info=True)
 
     def check_and_finalize_recording(self):
         """Check if all segments are transcribed and finalize recording"""
@@ -2004,12 +2039,17 @@ class VoiceCapture(QObject):
         unknown_results = [r for r in results if r.status == 'unknown']
         logger.info(f"Showing popups for {len(unknown_results)} unknown speaker(s) in '{recording_name}'")
 
+        aborted = False
         for r in unknown_results:
             dialog = self._build_speaker_popup(r.label, r.rep_fragment, audio_file, store)
             dialog.show()
             dialog.activateWindow()
             dialog.raise_()
             dialog.exec()
+
+            if dialog._abort:
+                aborted = True
+                break
 
             chosen = dialog._chosen_name
             if not chosen:
@@ -2023,6 +2063,10 @@ class VoiceCapture(QObject):
             if chosen not in parts:
                 parts.append(chosen)
             self.recording_manager.update_recording(recording_id, participants=parts)
+
+        if aborted:
+            logger.info("Spreker identificatie afgebroken door gebruiker.")
+            return
 
         self.recording_manager.update_recording(recording_id, all_participants_recognized=True)
 
@@ -2045,8 +2089,18 @@ class VoiceCapture(QObject):
         dialog.setMinimumWidth(420)
         dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         dialog._chosen_name = None
+        dialog._abort = False
 
         layout = QVBoxLayout()
+
+        # Top action buttons: Overslaan + Afsluiten
+        top_btn_layout = QHBoxLayout()
+        skip_btn = QPushButton("Overslaan")
+        abort_btn = QPushButton("Afsluiten")
+        top_btn_layout.addWidget(skip_btn)
+        top_btn_layout.addWidget(abort_btn)
+        top_btn_layout.addStretch()
+        layout.addLayout(top_btn_layout)
 
         # Fragment playback
         if rep_fragment:
@@ -2073,14 +2127,13 @@ class VoiceCapture(QObject):
         name_edit = QLineEdit()
         layout.addWidget(name_edit)
 
-        # Buttons
-        btn_layout = QHBoxLayout()
+        # Save button bottom-right, disabled until a name is provided
         save_btn = QPushButton("Sla op")
         save_btn.setEnabled(False)
-        skip_btn = QPushButton("Overslaan")
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(skip_btn)
-        layout.addLayout(btn_layout)
+        bottom_btn_layout = QHBoxLayout()
+        bottom_btn_layout.addStretch()
+        bottom_btn_layout.addWidget(save_btn)
+        layout.addLayout(bottom_btn_layout)
 
         dialog.setLayout(layout)
 
@@ -2100,8 +2153,13 @@ class VoiceCapture(QObject):
             dialog._chosen_name = None
             dialog.accept()
 
+        def on_abort():
+            dialog._abort = True
+            dialog.accept()
+
         save_btn.clicked.connect(on_save)
         skip_btn.clicked.connect(on_skip)
+        abort_btn.clicked.connect(on_abort)
 
         return dialog
 

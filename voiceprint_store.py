@@ -59,6 +59,10 @@ class VoiceprintStore:
 
     def add_embedding(self, name, vector):
         """Add embedding vector to named speaker profile, creating it if needed."""
+        if not name or not name.strip():
+            logger.warning("add_embedding called with empty name, skipping")
+            return
+        name = name.strip()
         vec = vector.tolist() if hasattr(vector, 'tolist') else list(vector)
         for speaker in self.speakers:
             if speaker["name"] == name:

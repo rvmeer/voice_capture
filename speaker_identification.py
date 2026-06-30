@@ -21,6 +21,65 @@ logger = get_logger(__name__)
 
 SIMILARITY_THRESHOLD = 0.80
 
+_hint_pipeline = None
+
+
+def _get_hint_pipeline():
+    """Return a cached diarization pipeline (loads once, reused across segments)."""
+    global _hint_pipeline
+    if _hint_pipeline is None:
+        from pyannote.audio import Pipeline
+        token = _get_hf_token()
+        device = _get_device()
+        logger.info("Loading diarization pipeline for segment speaker hints…")
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1", token=token
+        )
+        _hint_pipeline = pipeline.to(device)
+        logger.info("Diarization pipeline ready for segment hints.")
+    return _hint_pipeline
+
+
+def get_segment_speaker_hint(audio_file, store, threshold=SIMILARITY_THRESHOLD):
+    """
+    Quick speaker hint for a single audio segment WAV.
+    Runs the (cached) diarization pipeline on the file and matches each detected
+    speaker embedding against known voiceprints.
+
+    Returns (name, score) where name is None when no match meets the threshold.
+    Raises ImportError if pyannote/torch not installed.
+    """
+    pipeline = _get_hint_pipeline()
+
+    raw = pipeline(str(audio_file))
+    if isinstance(raw, _types.GeneratorType):
+        try:
+            next(raw)
+            raise RuntimeError("Pipeline generator did not stop as expected")
+        except StopIteration as _e:
+            diarize_output = _e.value
+    else:
+        diarize_output = raw
+
+    annotation = diarize_output.speaker_diarization
+    raw_embeddings = diarize_output.speaker_embeddings
+    labels = annotation.labels()
+
+    if not labels or raw_embeddings is None or len(raw_embeddings) == 0:
+        return None, 0.0
+
+    best_name, best_score = None, 0.0
+    for i, label in enumerate(labels):
+        if i >= len(raw_embeddings):
+            continue
+        name, score = store.best_match(raw_embeddings[i])
+        if name and score > best_score:
+            best_name, best_score = name, score
+
+    if best_name and best_score >= threshold:
+        return best_name, best_score
+    return None, best_score
+
 
 @dataclass
 class SpeakerResult:
